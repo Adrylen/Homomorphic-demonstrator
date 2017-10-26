@@ -8,13 +8,13 @@ LIB=$(addprefix -L,$(BINDIR)) -lseal
 
 all: clean compile exec
 
-compile: main.cpp
-	$(CXX) $^ $(CXXFLAGS) $(INCLUDES) $(LIB) -o main
+compile: benchmark.cpp
+	$(CXX) $^ $(CXXFLAGS) $(INCLUDES) $(LIB) -o benchmark
 
 exec:
-	@./main
+	@./benchmark
 
 clean:
 	@clear
-	@find . -name "benchmark.txt" -delete
-	@find . -name "main" -delete
+	@find . -name "benchmarkResults.txt" -delete
+	@find . -name "benchmark" -delete
