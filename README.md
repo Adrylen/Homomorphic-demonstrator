@@ -1,4 +1,4 @@
-#Homomorphic-demonstrator
+# Homomorphic-demonstrator
 
 ## How to compile SEAL library
 
