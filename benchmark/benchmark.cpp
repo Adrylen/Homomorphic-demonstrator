@@ -34,7 +34,7 @@ int main() {
 	const vector<int> decomposition_bit_count_list { 16, 32, 64, 128, 256 };
 
 	ofstream file;
-	file.open("benchmark.txt", ios::app);
+	file.open("benchmarkResults.txt", ios::app);
 
 	/* Test benchmark Programme */
 	cout << "/============================\\" << endl;
