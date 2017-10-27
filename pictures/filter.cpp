@@ -30,16 +30,35 @@ void apply_gray() {
   }
 }
 
+void negate()
+{
+    for(int y = 0; y < height; y++)
+    {
+        png_bytep row = row_pointers[y];
+        for(int x = 0; x < width; x++)
+        {
+            png_bytep px = &(row[x * 4]);
+
+            px[0] = 255 - px[0];
+            px[1] = 255 - px[1];
+            px[2] = 255 - px[2];
+
+            row[x * 4] = *px;
+        }
+        row_pointers[y] = row;
+    }
+}
+
 void decrypt() {
   
 }
 
 int main(int argc, char *argv[]) {
-  if(argc != 3) abort();
+  if(argc < 3) abort();
 
   read_png_file(argv[1]);
   encrypt();
-  apply_gray();
+  negate();
   decrypt();
   write_png_file(argv[2]);
 
