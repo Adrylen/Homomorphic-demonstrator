@@ -11,11 +11,14 @@ using namespace seal;
 int main()
 {
 
-	string polyModulus = "1x^128 + 1";
+	string polyModulus = "1x^1024 + 1";
 
 	BigUInt coeffModulus = ChooserEvaluator::default_parameter_options().at(1024);
 
-	int plainModulus = 257;
+	int plainModulus = 65537;       //valeur marche pour toutes les puissances de 2 j'usqu'à 8192 (poly_modulus)
+                                    //attention, réduit significativement le bruit disponible (peut être compensé par un coeff modulus plus grand, mais réduit la sécurité (?))
+
+    int dynamiqueValeursPlain = 256;    //peut être modifié si on travaille avec des valeurs comportant une autre dynamique (si on veux inverser des int par exemple)
 
 	EncryptionParameters parameters;
 
@@ -29,23 +32,21 @@ int main()
 	PolyCRTBuilder crtbuilder(parameters);
 
 	vector<BigUInt> values(crtbuilder.get_slot_count(), BigUInt(parameters.plain_modulus().bit_count(), static_cast<uint64_t>(0)));
-    vector<BigUInt> padder(crtbuilder.get_slot_count(), BigUInt(parameters.plain_modulus().bit_count(), static_cast<uint64_t>((plainModulus - 255 - 1))));
+    vector<BigUInt> reducteur(crtbuilder.get_slot_count(), BigUInt(parameters.plain_modulus().bit_count(), static_cast<uint64_t>(plainModulus - dynamiqueValeursPlain + 1)));
 
-	values[0] = 0;
-	values[1] = 13;
-	values[2] = 46;
-	values[3] = 157;
-	values[4] = 248;
-	values[5] = 255;
+    for(int i=0; i<128; i++)
+    {
+        values[i] = i*2;
+    }
 
 	cout << "Plaintext slot contents (slot, value): ";
-    for (size_t i = 0; i < 6; ++i)
+    for (size_t i = 0; i < 128; ++i)
     {
-        cout << "(" << i << ", " << values[i].to_dec_string() << ")" << ((i != 5) ? ", " : "\n");
+        cout << "(" << i << ", " << values[i].to_dec_string() << ")" << ((i != 127) ? ", " : "\n");
     }
 
     Plaintext plainPoly = crtbuilder.compose(values);
-    Plaintext padding = crtbuilder.compose(padder);
+    Plaintext reduction = crtbuilder.compose(reducteur);
 
     KeyGenerator generator(parameters);
     generator.generate();
@@ -57,21 +58,21 @@ int main()
     Decryptor decryptor(parameters, secretKey);
 
     Ciphertext encryptedPoly = encryptor.encrypt(plainPoly);
+    cout << "Noise budget at start: " << decryptor.invariant_noise_budget(encryptedPoly) << " bits" << endl;
 
-    Ciphertext paddedPoly = evaluator.add_plain(encryptedPoly, padding);
-    
-    Ciphertext modifiedPoly = evaluator.negate(paddedPoly);
+    Ciphertext modifiedPoly = evaluator.negate(encryptedPoly);
 
-    Ciphertext unpaddedPoly = evaluator.sub_plain(modifiedPoly, padding);
+    Ciphertext reductedPoly = evaluator.sub_plain(modifiedPoly, reduction);
+    cout << "Noise budget in result: " << decryptor.invariant_noise_budget(reductedPoly) << " bits" << endl;
 
-    Plaintext finalPoly = decryptor.decrypt(unpaddedPoly);
+    Plaintext finalPoly = decryptor.decrypt(reductedPoly);
 
 
     crtbuilder.decompose(finalPoly, values);
 
     cout << "negated contents (slot, value): ";
-    for (size_t i = 0; i < 6; ++i)
+    for (size_t i = 0; i < 128; ++i)
     {
-        cout << "(" << i << ", " << values[i].to_dec_string() << ")" << ((i != 5) ? ", " : "\n");
+        cout << "(" << i << ", " << values[i].to_dec_string() << ")" << ((i != 127) ? ", " : "\n");
     }
 }
