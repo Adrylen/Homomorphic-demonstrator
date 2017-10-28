@@ -4,16 +4,16 @@ SEALDIR=../SEAL
 CXX=g++
 CXXFLAGS=-march=native -std=c++11 
 INCLUDES=$(addprefix -I,$(SEALDIR))
-LIB=$(addprefix -L,$(BINDIR)) -lseal
+LIB=$(addprefix -L,$(BINDIR)) -lseal -lpng
 
 all: clean compile exec
 
-compile: demoNegatif.cpp
-	$(CXX) $^ $(CXXFLAGS) $(INCLUDES) $(LIB) -o demoNegatif
+compile: negationImage.cpp
+	$(CXX) $^ $(CXXFLAGS) $(INCLUDES) $(LIB) -o negationImage
 
 exec:
-	@./demoNegatif
+	@./negationImage
 
 clean:
 	@clear
-	@find . -name "demoNegatif" -delete
+	@find . -name "negationImage" -delete

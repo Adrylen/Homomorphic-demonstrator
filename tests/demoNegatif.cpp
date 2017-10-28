@@ -12,10 +12,10 @@ int main()
 {
 
 	string polyModulus = "1x^1024 + 1";
-
+    
 	BigUInt coeffModulus = ChooserEvaluator::default_parameter_options().at(1024);
 
-	int plainModulus = 65537;       //valeur marche pour toutes les puissances de 2 j'usqu'à 8192 (poly_modulus)
+	int plainModulus = 65537;       //valeur marche pour toutes les puissances de 2 jusqu'à 8192 (poly_modulus)
                                     //attention, réduit significativement le bruit disponible (peut être compensé par un coeff modulus plus grand, mais réduit la sécurité (?))
 
     int dynamiqueValeursPlain = 256;    //peut être modifié si on travaille avec des valeurs comportant une autre dynamique (si on veux inverser des int par exemple)
