@@ -6,7 +6,7 @@ CXXFLAGS=-march=native -std=c++11
 INCLUDES=$(addprefix -I,$(SEALDIR))
 LIB=$(addprefix -L,$(BINDIR)) -lseal -lpng
 
-all: clean compile exec
+all: clean compile
 
 compile: negationImage.cpp
 	$(CXX) $^ $(CXXFLAGS) $(INCLUDES) $(LIB) -o negationImage
