@@ -1,6 +1,5 @@
 #include <fstream>
 #include <iostream>
-#include <fstream>
 #include <string>
 #include <vector>
 
@@ -191,6 +190,19 @@ class ImageCiphertext
 			imageWidth = autre.getWidth();
 		}
 
+		ImageCiphertext(ImageCiphertext& autre) : publicKey(BigPolyArray())
+		{
+			EncryptionParameters autreParameters = autre.getParameters();
+			autreParameters.validate();
+			imageParameters = autreParameters;
+
+			imageWidth = autre.getWidth();
+			imageHeight = autre.getHeight();
+
+			encryptedImageData.resize(autre.getDataSize(), BigPolyArray());
+
+		}
+
 		bool generateKeys()
 		{
 			cout << "generating keys" << endl;
@@ -280,6 +292,78 @@ class ImageCiphertext
 
 		}
 
+		bool save()
+		{
+			string fileName = "outfile";
+
+			cout << "début de sauvegarde du fichier crypté" << endl;
+
+			ofstream fileBin;
+			fileBin.open(fileName, ios::out | ios::binary);
+
+			secretKey.save(fileBin);
+			publicKey.save(fileBin);
+
+			for(uint64_t i=0; i<encryptedImageData.size(); i++)
+			{
+				encryptedImageData.at(i).save(fileBin);
+			}
+			fileBin.close();
+
+			cout << "fin de la sauvegarde" << endl;
+		}
+
+		bool load()
+		{
+			string fileName = "outfile";
+
+			cout << "début de chargement du fichier crypté" << endl;
+
+			ifstream fileBin;
+			fileBin.open(fileName, ios::in | ios::binary);
+
+			secretKey.load(fileBin);
+			publicKey.load(fileBin);
+
+			for(uint64_t i=0; i<encryptedImageData.size(); i++)
+			{
+				encryptedImageData.at(i).load(fileBin);
+			}
+			fileBin.close();
+
+			cout << "fin du chargement" << endl;
+		}
+
+		uint32_t getDataSize()
+		{
+			uint32_t dataSize = encryptedImageData.size();
+			return dataSize;
+		}
+
+		Ciphertext getDataAt(uint32_t index)
+		{
+			Ciphertext retCipher((const Ciphertext) encryptedImageData.at(index));
+			return retCipher;
+		}
+
+		uint32_t getHeight()
+		{
+			uint32_t retHeight(imageHeight);
+			return retHeight;
+		}
+
+		uint32_t getWidth()
+		{
+			uint32_t retWidth(imageWidth);
+			return retWidth;
+		}
+
+		EncryptionParameters getParameters()
+		{
+			EncryptionParameters retParameters((const EncryptionParameters) imageParameters);
+			return retParameters;
+		}
+
 	private :
 		EncryptionParameters imageParameters;
 		Plaintext secretKey;
@@ -322,10 +406,14 @@ int main(int argc, char* argv[])
 
 	ImageCiphertext imageCryptee(monImage);
 	imageCryptee.encrypt(monImage);
+	ImageCiphertext imageLoaded(imageCryptee);
 
-	imageCryptee.negate();
+	imageCryptee.save();
+	imageLoaded.load();
 
-	ImagePlaintext imageFinale = imageCryptee.decrypt();
+	imageLoaded.negate();
+
+	ImagePlaintext imageFinale = imageLoaded.decrypt();
 	imageFinale.toImage("imageNegate.png");
 
 	return 0;
