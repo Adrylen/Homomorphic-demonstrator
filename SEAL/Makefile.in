@@ -9,9 +9,9 @@ OBJS=$(SRCS:%.cpp=$(OBJ_DIR)/%.o)
 DEPS=$(OBJS:.o=.d)
 INSTALL_DIR=SEAL
 SEALLIB=libseal.a
-CXX=g++
-CXXFLAGS=-march=native -std=c++11
-PREFIX=
+CXX=@CXX@
+CXXFLAGS=@CXXFLAGS@ @DEFS@ -march=native -std=c++11
+PREFIX=@prefix@
 
 .PHONY : all clean install uninstall
 
