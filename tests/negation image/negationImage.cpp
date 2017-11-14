@@ -13,11 +13,13 @@ using namespace seal;
 class ImagePlaintext
 {
 	public :
-		ImagePlaintext(EncryptionParameters parameters, char* fileName)
+	/**
+		crée un nouvel objet correspondant aux données d'une image sous forme de plaintext (CRT) appartenant à SEAL
+		@param[in] parameters paramètres décidés en amont, et validés
+		@param[in] fileName le nom du fichier à ouvrir (png)
+	*/
+		ImagePlaintext(const SEALContext &context, char* fileName) : imageContext(context)
 		{
-			parameters.validate();
-
-			imageParameters = parameters;
 
 			//methode à ajouter pour vérifier le fileName et l'image correspondante (si existante) et set les attributs imageWidth et imageHeight
 			//pour le moment le set se fait dans PNGToImagePlaintext
@@ -25,10 +27,11 @@ class ImagePlaintext
 			toPlaintext(fileName);
 		}
 
-		ImagePlaintext(EncryptionParameters parameters, uint32_t height, uint32_t width, vector<Plaintext> data)
+	/**
+		contructeur utilisé pour copier les données décryptées d'un objet ImageCiphertext dans un objet de type ImagePlaintext
+	*/
+		ImagePlaintext(const SEALContext &context, uint32_t height, uint32_t width, vector<Plaintext> data) : imageContext(context)
 		{
-			parameters.validate();
-			imageParameters = parameters;
 
 			imageHeight = height;
 			imageWidth = width;
@@ -39,12 +42,20 @@ class ImagePlaintext
 			}
 		}
 
+	/**
+		lit une image png pour contruire un objet ImagePlaintext contenant les données de l'image.
+		les données sont ordonnées dans un vecteur contenant des polynomes Plaintext, eux même contenant les coefficient d'un couleur
+		d'une ligne de l'image
+		càd que chaque Plaintext du vecteur de données contient les soit les rouges, soit les verts, soit les bleus d'une ligne de l'image
+		dans cet ordre.
+		à cet effet, le poly_modulus des paramètres choisis doit être supérieur à la largeur de l'image 
+	*/
 		bool toPlaintext(char* fileName)
 		{
-			PolyCRTBuilder crtbuilder(imageParameters);
+			PolyCRTBuilder crtbuilder(imageContext);
 			read_png_file(fileName);
 
-			if(width > imageParameters.poly_modulus().significant_coeff_count() - 1)
+			if(width > imageContext.poly_modulus().significant_coeff_count() - 1)
 				throw invalid_argument("poly_modulus doit être supérieur à la largeur de l'image");
 
 			cout << "début d'encodage" << endl;
@@ -52,9 +63,9 @@ class ImagePlaintext
 			imageWidth = width;
 			imageHeight = height;
 
-			vector<BigUInt> reds(crtbuilder.get_slot_count(), BigUInt(imageParameters.plain_modulus().bit_count(), static_cast<uint64_t>(0)));
-			vector<BigUInt> greens(crtbuilder.get_slot_count(), BigUInt(imageParameters.plain_modulus().bit_count(), static_cast<uint64_t>(0)));
-			vector<BigUInt> blues(crtbuilder.get_slot_count(), BigUInt(imageParameters.plain_modulus().bit_count(), static_cast<uint64_t>(0)));
+			vector<uint64_t> reds(crtbuilder.slot_count(), 0);
+			vector<uint64_t> greens(crtbuilder.slot_count(), 0);
+			vector<uint64_t> blues(crtbuilder.slot_count(), 0);
 
 			Plaintext redsPoly;
 			Plaintext greensPoly;
@@ -72,9 +83,9 @@ class ImagePlaintext
 					blues[j] = px[2];
 				}
 
-				redsPoly = crtbuilder.compose(reds);
-				greensPoly = crtbuilder.compose(greens);
-				bluesPoly = crtbuilder.compose(blues);
+				crtbuilder.compose(reds, redsPoly);
+				crtbuilder.compose(greens, greensPoly);
+				crtbuilder.compose(blues, bluesPoly);
 				imageData.push_back(redsPoly);
 				imageData.push_back(greensPoly);
 				imageData.push_back(bluesPoly);
@@ -84,39 +95,41 @@ class ImagePlaintext
 
 			return 0;
 		}
-
+	/**
+		crée une nouvelle image d'apès les données contenues dans l'objet ImagePlaintext
+	*/
 		bool toImage(char* fileName)
 		{
-			PolyCRTBuilder crtbuilder(imageParameters);
+			PolyCRTBuilder crtbuilder(imageContext);
 
 			cout << "début décodage" << endl;
 
 			int height = imageHeight;
 			int width = imageWidth;
 
-			vector<BigUInt> reds(crtbuilder.get_slot_count(), BigUInt(imageParameters.plain_modulus().bit_count(), static_cast<uint64_t>(0)));
-			vector<BigUInt> greens(crtbuilder.get_slot_count(), BigUInt(imageParameters.plain_modulus().bit_count(), static_cast<uint64_t>(0)));
-			vector<BigUInt> blues(crtbuilder.get_slot_count(), BigUInt(imageParameters.plain_modulus().bit_count(), static_cast<uint64_t>(0)));
+			vector<uint64_t> reds(crtbuilder.slot_count(), 0);
+			vector<uint64_t> greens(crtbuilder.slot_count(), 0);
+			vector<uint64_t> blues(crtbuilder.slot_count(), 0);
 
 			for(int i = 0; i < height; i++)
 			{
 				png_bytep row = row_pointers[i];
 
-				reds = crtbuilder.decompose(imageData.at(i * 3));
-				greens = crtbuilder.decompose(imageData.at(i * 3 + 1));
-				blues = crtbuilder.decompose(imageData.at(i * 3 + 2));
+				crtbuilder.decompose(imageData.at(i * 3), reds);
+				crtbuilder.decompose(imageData.at(i * 3 + 1), greens);
+				crtbuilder.decompose(imageData.at(i * 3 + 2), blues);
 
 				for(int j = 0; j < width; j++)
 				{
 					png_bytep px = &(row[j * 4]);
 
-					px[0] = (char)*reds[j].pointer();
-					px[1] = (char)*greens[j].pointer();
-					px[2] = (char)*blues[j].pointer();
+					px[0] = reds[j];
+					px[1] = greens[j];
+					px[2] = blues[j];
 				}
 			}
 
-			cout << "fin décodage" << endl;
+			cout << endl << "fin décodage" << endl;
 
 			cout << "début écriture PNG" << endl;
 			write_png_file(fileName);
@@ -125,36 +138,56 @@ class ImagePlaintext
 			return 0;
 		}
 
+	/**
+		revoie la taille u vecteur contenant les données de l'image
+		(revoie le nombre de Plaintexts, soit le nombre de lignes de l'image fois trois)
+	*/
 		uint32_t getDataSize()
 		{
 			uint32_t dataSize = imageData.size();
 			return dataSize;
 		}
 
+	/**
+		renvoie le Plaintext des données à l'indice index
+		soit un Plaintext contenant la ligne des rouges, des verts ou des bleus d'une ligne
+	*/
 		Plaintext getDataAt(uint32_t index)
 		{
 			Plaintext retPlain((const Plaintext) imageData.at(index));
 			return retPlain;
 		}
 
+	/**
+		renvoie la hauteur de l'image
+	*/
 		uint32_t getHeight()
 		{
 			uint32_t retHeight(imageHeight);
 			return retHeight;
 		}
 
+	/**
+		renvoie la largeur de l'image
+	*/
 		uint32_t getWidth()
 		{
 			uint32_t retWidth(imageWidth);
 			return retWidth;
 		}
 
-		EncryptionParameters getParameters()
+	/**
+		renvoie les paramètres associés à ImagePlaintext
+	*/
+		SEALContext getContext()
 		{
-			EncryptionParameters retParameters((const EncryptionParameters) imageParameters);
-			return retParameters;
+			SEALContext retContext((const SEALContext) imageContext);
+			return retContext;
 		}
 
+	/**
+		renvoie un string comprenant tous les Plaintexts de l'image les uns après les autres (avec un retour à la ligne)
+	*/
 		string to_string()
 		{
 			string retString;
@@ -168,8 +201,24 @@ class ImagePlaintext
 			return retString;
 		}
 
+		void printParameters()
+		{
+		    cout << "/ Encryption parameters:" << endl;
+		    cout << "| poly_modulus: " << imageContext.poly_modulus().to_string() << endl;
+
+		    /*
+		    Print the size of the true (product) coefficient modulus
+		    */
+		    cout << "| coeff_modulus size: " 
+		        << imageContext.total_coeff_modulus().significant_bit_count() << " bits" << endl;
+
+		    cout << "| plain_modulus: " << imageContext.plain_modulus().value() << endl;
+		    cout << "\\ noise_standard_deviation: " << imageContext.noise_standard_deviation() << endl;
+		    cout << endl;
+		}
+
 	private : 
-		EncryptionParameters imageParameters;
+		SEALContext imageContext;
 		uint32_t imageHeight, imageWidth;
 		vector<Plaintext> imageData;
 };
@@ -178,11 +227,11 @@ class ImagePlaintext
 class ImageCiphertext
 {
 	public :
-		ImageCiphertext(ImagePlaintext autre) : publicKey(BigPolyArray())
+		ImageCiphertext(ImagePlaintext autre) : imageContext(autre.getContext())
 		{
-			EncryptionParameters autreParameters = autre.getParameters();
-			autreParameters.validate();
-			imageParameters = autreParameters;
+			pKey = PublicKey();
+			sKey = SecretKey();
+			// imageContext = autre.getContext();
 
 			generateKeys();
 
@@ -190,35 +239,33 @@ class ImageCiphertext
 			imageWidth = autre.getWidth();
 		}
 
-		ImageCiphertext(ImageCiphertext& autre) : publicKey(BigPolyArray())
+		ImageCiphertext(ImageCiphertext& autre) : imageContext(autre.getContext())
 		{
-			EncryptionParameters autreParameters = autre.getParameters();
-			autreParameters.validate();
-			imageParameters = autreParameters;
+			pKey = PublicKey();
+			sKey = SecretKey();
+			// imageContext = autre.getContext();
 
 			imageWidth = autre.getWidth();
 			imageHeight = autre.getHeight();
 
-			encryptedImageData.resize(autre.getDataSize(), BigPolyArray());
-
+			encryptedImageData.resize(autre.getDataSize(), Ciphertext());
 		}
 
 		bool generateKeys()
 		{
 			cout << "generating keys" << endl;
 
-			KeyGenerator generator(imageParameters);
-		    generator.generate();
-		    secretKey = generator.secret_key();
-		    publicKey = generator.public_key();
+			KeyGenerator generator(imageContext);
+		    sKey = generator.secret_key();
+		    pKey = generator.public_key();
 
 		    cout << "keys generated successfully" << endl;
 		}
 
 		bool encrypt(ImagePlaintext autre)
 		{
-			Encryptor encryptor(imageParameters, publicKey);
-			Ciphertext cipherTampon = BigPolyArray();
+			Encryptor encryptor(imageContext, pKey);
+			Ciphertext cipherTampon = Ciphertext();
 
 			encryptedImageData.clear();
 
@@ -226,7 +273,7 @@ class ImageCiphertext
 
 			for(uint64_t i = 0; i < autre.getDataSize(); i++)
 			{
-				cipherTampon = encryptor.encrypt(autre.getDataAt(i));
+				encryptor.encrypt(autre.getDataAt(i), cipherTampon);
 				encryptedImageData.push_back(cipherTampon);
 			}
 
@@ -235,57 +282,44 @@ class ImageCiphertext
 
 		ImagePlaintext decrypt()
 		{
-			Decryptor decryptor(imageParameters, secretKey);
+			Decryptor decryptor(imageContext, sKey);
 			vector<Plaintext> decryptedData;
+			Plaintext plainTampon = Plaintext();
 
 			cout << "début du décryptage image" << endl;
 
 			for(uint64_t i = 0; i < encryptedImageData.size(); i++)
 			{
-				decryptedData.push_back(decryptor.decrypt(encryptedImageData.at(i)));
+				decryptor.decrypt(encryptedImageData.at(i), plainTampon);
+				decryptedData.push_back(plainTampon);
 			}
 
 			cout << "fin décryptage" << endl;
 
-			return ImagePlaintext(imageParameters, imageHeight, imageWidth, decryptedData);
+			return ImagePlaintext(imageContext, imageHeight, imageWidth, decryptedData);
 		}
-
-		// string to_string()
-		// {
-		// 	string retString;
-
-		// 	for(uint64_t i = 0; i < encryptedImageData.size(); i++)
-		// 	{
-		// 		retString.append(encryptedImageData.at(i).to_string());
-		// 		retString.append("\n");
-		// 	}
-
-		// 	return retString;
-		// }
 
 
 		bool negate()
 		{
-			uint64_t plainModulus = *imageParameters.plain_modulus().pointer();
-			int dynamiqueValeursPlain = 256;
+			uint64_t plainModulus = *imageContext.plain_modulus().pointer();
 
-			Ciphertext cipherTampon = BigPolyArray();
-			Ciphertext cipherTampon2 = BigPolyArray();
+			int dynamiqueValeursPlain = 255;
 
-			Evaluator evaluator(imageParameters);
-			PolyCRTBuilder crtbuilder(imageParameters);
+			Evaluator evaluator(imageContext);
+			PolyCRTBuilder crtbuilder(imageContext);
 
-			vector<BigUInt> reducteur(crtbuilder.get_slot_count(), BigUInt(imageParameters.plain_modulus().bit_count(), static_cast<uint64_t>(plainModulus - dynamiqueValeursPlain + 1)));
+			vector<uint64_t> reducteur(crtbuilder.slot_count(), plainModulus-dynamiqueValeursPlain);
 
-			Plaintext reduction = crtbuilder.compose(reducteur);
+			Plaintext reduction;
+			crtbuilder.compose(reducteur, reduction);
 
 			cout << "beggining negate" << endl;
 
 			for(uint64_t i = 0; i < encryptedImageData.size(); i++)
 			{
-				cipherTampon = evaluator.negate(encryptedImageData.at(i));
-				cipherTampon2 = evaluator.sub_plain(cipherTampon, reduction);
-				encryptedImageData.at(i) = cipherTampon2;
+				evaluator.negate(encryptedImageData.at(i));
+				evaluator.sub_plain(encryptedImageData.at(i), reduction);
 			}
 
 			cout << "end of negate" << endl;
@@ -294,15 +328,15 @@ class ImageCiphertext
 
 		bool save()
 		{
-			string fileName = "outfile";
+			string fileName = "Ciphertext";
 
 			cout << "début de sauvegarde du fichier crypté" << endl;
 
 			ofstream fileBin;
 			fileBin.open(fileName, ios::out | ios::binary);
 
-			secretKey.save(fileBin);
-			publicKey.save(fileBin);
+			sKey.save(fileBin);
+			pKey.save(fileBin);
 
 			for(uint64_t i=0; i<encryptedImageData.size(); i++)
 			{
@@ -315,15 +349,15 @@ class ImageCiphertext
 
 		bool load()
 		{
-			string fileName = "outfile";
+			string fileName = "Ciphertext";
 
 			cout << "début de chargement du fichier crypté" << endl;
 
 			ifstream fileBin;
 			fileBin.open(fileName, ios::in | ios::binary);
 
-			secretKey.load(fileBin);
-			publicKey.load(fileBin);
+			sKey.load(fileBin);
+			pKey.load(fileBin);
 
 			for(uint64_t i=0; i<encryptedImageData.size(); i++)
 			{
@@ -358,16 +392,32 @@ class ImageCiphertext
 			return retWidth;
 		}
 
-		EncryptionParameters getParameters()
+		SEALContext getContext()
 		{
-			EncryptionParameters retParameters((const EncryptionParameters) imageParameters);
-			return retParameters;
+			SEALContext retContext((const SEALContext) imageContext);
+			return retContext;
+		}
+
+		void printParameters()
+		{
+		    cout << endl << "/ Encryption parameters:" << endl;
+		    cout << "| poly_modulus: " << imageContext.poly_modulus().to_string() << endl;
+
+		    /*
+		    Print the size of the true (product) coefficient modulus
+		    */
+		    cout << "| coeff_modulus size: " 
+		        << imageContext.total_coeff_modulus().significant_bit_count() << " bits" << endl;
+
+		    cout << "| plain_modulus: " << imageContext.plain_modulus().value() << endl;
+		    cout << "\\ noise_standard_deviation: " << imageContext.noise_standard_deviation() << endl;
+		    cout << endl;
 		}
 
 	private :
-		EncryptionParameters imageParameters;
-		Plaintext secretKey;
-		Ciphertext publicKey;
+		SEALContext imageContext;
+		SecretKey sKey;
+		PublicKey pKey;
 		uint32_t imageHeight, imageWidth;
 		vector<Ciphertext> encryptedImageData;
 };
@@ -379,9 +429,9 @@ int main(int argc, char* argv[])
 
 	string polyModulus = "1x^1024 + 1";
     
-	BigUInt coeffModulus = ChooserEvaluator::default_parameter_options().at(1024);
+	auto coeffModulus = coeff_modulus_128(2048);
 
-	int plainModulus = 65537;       //valeur marche pour toutes les puissances de 2 jusqu'à 8192 (poly_modulus)
+	int plainModulus = 40961;       //valeur marche pour toutes les puissances de 2 jusqu'à 8192 (poly_modulus)
                                     //attention, réduit significativement le bruit disponible (peut être compensé par un coeff modulus plus grand, mais réduit la sécurité (?))
 
     int dynamiqueValeursPlain = 256;    //peut être modifié si on travaille avec des valeurs comportant une autre dynamique (si on veux inverser des int par exemple)
@@ -392,21 +442,23 @@ int main(int argc, char* argv[])
 	parameters.set_coeff_modulus(coeffModulus);
 	parameters.set_plain_modulus(plainModulus);
 
-	parameters.validate();
+	SEALContext context(parameters);
 
-	cout << "poly_modulus of parameters : " << parameters.poly_modulus().significant_coeff_count() << endl;	//pratique pour savoir quel est le poly_modulus !
+	auto qualifiers = context.qualifiers();
+    cout << "Batching enabled: " << boolalpha << qualifiers.enable_batching << endl;
 
-	ImagePlaintext monImage(parameters, argv[1]);
+	ImagePlaintext monImage(context, argv[1]);
 
-	ofstream outFile;
-	outFile.open("ImagePlaintext.txt", ios::out);
-	outFile << monImage.to_string();
-	outFile.close();
+	// ofstream outFile;
+	// outFile.open("ImagePlaintext.txt", ios::out);
+	// outFile << monImage.to_string();
+	// outFile.close();
 
 
 	ImageCiphertext imageCryptee(monImage);
+
 	imageCryptee.encrypt(monImage);
-	ImageCiphertext imageLoaded(imageCryptee);
+	ImageCiphertext imageLoaded(imageCryptee);	//créée en tant que copie de l'imageCryptée
 
 	imageCryptee.save();
 	imageLoaded.load();
@@ -414,6 +466,7 @@ int main(int argc, char* argv[])
 	imageLoaded.negate();
 
 	ImagePlaintext imageFinale = imageLoaded.decrypt();
+
 	imageFinale.toImage("imageNegate.png");
 
 	return 0;
