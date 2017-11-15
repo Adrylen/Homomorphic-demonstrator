@@ -4,6 +4,7 @@
 #include <vector>
 
 #include <seal/seal.h>
+#include "filter.cpp"
 
 using namespace std;
 using namespace seal;
@@ -12,11 +13,11 @@ class ImageCiphertext
 {
 
 	public :
-		ImageCiphertext(ImagePlaintext autre) : imageContext(autre.getContext()), operations()
+		ImageCiphertext(ImagePlaintext autre) : imageContext(autre.getContext())
 		{
 			pKey = PublicKey();
 			sKey = SecretKey();
-			// imageContext = autre.getContext();
+			normalisation = 1.0;
 
 			generateKeys();
 
@@ -24,11 +25,11 @@ class ImageCiphertext
 			imageWidth = autre.getWidth();
 		}
 
-		ImageCiphertext(ImageCiphertext& autre) : imageContext(autre.getContext()), operations()
+		ImageCiphertext(ImageCiphertext& autre) : imageContext(autre.getContext())
 		{
 			pKey = PublicKey();
 			sKey = SecretKey();
-			// imageContext = autre.getContext();
+			normalisation = 1.0;
 
 			imageWidth = autre.getWidth();
 			imageHeight = autre.getHeight();
@@ -81,13 +82,13 @@ class ImageCiphertext
 
 			cout << "fin décryptage" << endl;
 
-			return ImagePlaintext(imageContext, imageHeight, imageWidth, operations, decryptedData);
+			return ImagePlaintext(imageContext, imageHeight, imageWidth, normalisation, decryptedData);
 		}
 
 
 		bool negate()
 		{
-			if(!operations.grey)
+			if(normalisation == 1)
 			{
 				uint64_t plainModulus = *imageContext.plain_modulus().pointer();
 
@@ -109,13 +110,11 @@ class ImageCiphertext
 					evaluator.sub_plain(encryptedImageData.at(i), reduction);
 				}
 
-				operations.negate = true;
-
 				cout << "end of negate" << endl;
 			}
 			else
 			{
-				cout << "negation impossible after greying" << endl;
+				cout << "negation impossible, normalisation necessary" << endl;
 			}
 			
 		}
@@ -150,7 +149,7 @@ class ImageCiphertext
 				encryptedImageData.at(i+2) = weightedRed;
 			}
 
-			operations.grey = true;
+			normalisation *= 0.01;
 
 			cout << "end of greying" << endl;
 		}
@@ -227,20 +226,6 @@ class ImageCiphertext
 			return retContext;
 		}
 
-		Op getOperations()
-		{
-			Op retOp(operations);
-			return retOp;
-		}
-
-		void printOperations()
-		{
-			cout << endl << boolalpha
-				<< "negation of picture : " << operations.negate << endl
-				<< "greying of picture : " << operations.grey << endl
-				<< endl;
-		}
-
 		void printParameters()
 		{
 		    cout << endl << "/ Encryption parameters:" << endl;
@@ -263,5 +248,5 @@ class ImageCiphertext
 		PublicKey pKey;
 		uint32_t imageHeight, imageWidth;
 		vector<Ciphertext> encryptedImageData;
-		Op operations;
+		float normalisation;
 };

@@ -4,7 +4,6 @@
 #include <vector>
 
 #include <seal/seal.h>
-#include "operations.cpp"
 
 using namespace std;
 using namespace seal;
@@ -37,7 +36,6 @@ int main(int argc, char* argv[])
 
 	ImagePlaintext monImage(context, argv[1]);
 	monImage.printParameters();
-	monImage.printOperations();
 
 	ImageCiphertext imageCryptee(monImage);
 
@@ -48,10 +46,8 @@ int main(int argc, char* argv[])
 	imageLoaded.load();
 
 	imageLoaded.grey();
-	imageLoaded.printOperations();
 
 	ImagePlaintext imageFinale = imageLoaded.decrypt();
-	imageFinale.printOperations();
 
 	imageFinale.toImage("imageNegate.png");
 

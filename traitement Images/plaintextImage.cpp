@@ -5,6 +5,7 @@
 
 #include <seal/seal.h>
 #include "png-util.h"
+#include "filter.cpp"
 
 using namespace std;
 using namespace seal;
@@ -18,7 +19,7 @@ class ImagePlaintext
 		@param[in] parameters paramètres décidés en amont, et validés
 		@param[in] fileName le nom du fichier à ouvrir (png)
 	*/
-		ImagePlaintext(const SEALContext &context, char* fileName) : imageContext(context), operations()
+		ImagePlaintext(const SEALContext &context, char* fileName) : imageContext(context)
 		{
 
 			//methode à ajouter pour vérifier le fileName et l'image correspondante (si existante) et set les attributs imageWidth et imageHeight
@@ -30,10 +31,9 @@ class ImagePlaintext
 	/**
 		contructeur utilisé pour copier les données décryptées d'un objet ImageCiphertext dans un objet de type ImagePlaintext
 	*/
-		ImagePlaintext(const SEALContext &context, uint32_t height, uint32_t width, Op operationsDone, vector<Plaintext> data) : imageContext(context)
+		ImagePlaintext(const SEALContext &context, uint32_t height, uint32_t width, float normalisation, vector<Plaintext> data) : imageContext(context)
 		{
-			operations.negate = operationsDone.negate;
-			operations.grey = operationsDone.grey;
+			this->normalisation = normalisation;
 			imageHeight = height;
 			imageWidth = width;
 
@@ -112,44 +112,21 @@ class ImagePlaintext
 			vector<uint64_t> greens(crtbuilder.slot_count(), 0);
 			vector<uint64_t> blues(crtbuilder.slot_count(), 0);
 
-			if(operations.grey)
+			for(int i = 0; i < height; i++)
 			{
-				for(int i = 0; i < height; i++)
+				png_bytep row = row_pointers[i];
+
+				crtbuilder.decompose(imageData.at(i * 3), reds);
+				crtbuilder.decompose(imageData.at(i * 3 + 1), greens);
+				crtbuilder.decompose(imageData.at(i * 3 + 2), blues);
+
+				for(int j = 0; j < width; j++)
 				{
-					png_bytep row = row_pointers[i];
+					png_bytep px = &(row[j * 4]);
 
-					crtbuilder.decompose(imageData.at(i * 3), reds);
-					crtbuilder.decompose(imageData.at(i * 3 + 1), greens);
-					crtbuilder.decompose(imageData.at(i * 3 + 2), blues);
-
-					for(int j = 0; j < width; j++)
-					{
-						png_bytep px = &(row[j * 4]);
-
-						px[0] = (int)reds[j]/100;
-						px[1] = (int)greens[j]/100;
-						px[2] = (int)blues[j]/100;
-					}
-				}
-			}
-			else
-			{
-				for(int i = 0; i < height; i++)
-				{
-					png_bytep row = row_pointers[i];
-
-					crtbuilder.decompose(imageData.at(i * 3), reds);
-					crtbuilder.decompose(imageData.at(i * 3 + 1), greens);
-					crtbuilder.decompose(imageData.at(i * 3 + 2), blues);
-
-					for(int j = 0; j < width; j++)
-					{
-						png_bytep px = &(row[j * 4]);
-
-						px[0] = reds[j];
-						px[1] = greens[j];
-						px[2] = blues[j];
-					}
+					px[0] = (int)reds[j]*normalisation;
+					px[1] = (int)greens[j]*normalisation;
+					px[2] = (int)blues[j]*normalisation;
 				}
 			}
 
@@ -209,11 +186,6 @@ class ImagePlaintext
 			return retContext;
 		}
 
-		Op getOperations()
-		{
-			Op retOp(operations);
-			return retOp;
-		}
 
 	/**
 		renvoie un string comprenant tous les Plaintexts de l'image les uns après les autres (avec un retour à la ligne)
@@ -231,13 +203,6 @@ class ImagePlaintext
 			return retString;
 		}
 
-		void printOperations()
-		{
-			cout << endl << boolalpha
-				<< "negation of picture : " << operations.negate << endl
-				<< "greying of picture : " << operations.grey << endl
-				<< endl;
-		}
 
 		void printParameters()
 		{
@@ -259,5 +224,5 @@ class ImagePlaintext
 		SEALContext imageContext;
 		uint32_t imageHeight, imageWidth;
 		vector<Plaintext> imageData;
-		Op operations;
+		float normalisation;
 };
