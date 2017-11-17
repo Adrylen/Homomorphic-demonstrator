@@ -3,11 +3,17 @@
 #include <string>
 #include <vector>
 
-#include "seal.h"
+#include <seal/seal.h>
 #include "png-util.h"
 
 using namespace std;
 using namespace seal;
+
+struct op
+{
+	bool negate;
+	bool grey;
+};
 
 
 class ImagePlaintext
@@ -18,7 +24,7 @@ class ImagePlaintext
 		@param[in] parameters paramètres décidés en amont, et validés
 		@param[in] fileName le nom du fichier à ouvrir (png)
 	*/
-		ImagePlaintext(const SEALContext &context, char* fileName) : imageContext(context)
+		ImagePlaintext(const SEALContext &context, char* fileName) : imageContext(context), operations{false, false}
 		{
 
 			//methode à ajouter pour vérifier le fileName et l'image correspondante (si existante) et set les attributs imageWidth et imageHeight
@@ -30,9 +36,9 @@ class ImagePlaintext
 	/**
 		contructeur utilisé pour copier les données décryptées d'un objet ImageCiphertext dans un objet de type ImagePlaintext
 	*/
-		ImagePlaintext(const SEALContext &context, uint32_t height, uint32_t width, vector<Plaintext> data) : imageContext(context)
+		ImagePlaintext(const SEALContext &context, uint32_t height, uint32_t width, op operationsDone, vector<Plaintext> data) : imageContext(context)
 		{
-
+			operations = operationsDone;
 			imageHeight = height;
 			imageWidth = width;
 
@@ -111,25 +117,48 @@ class ImagePlaintext
 			vector<uint64_t> greens(crtbuilder.slot_count(), 0);
 			vector<uint64_t> blues(crtbuilder.slot_count(), 0);
 
-			for(int i = 0; i < height; i++)
+			if(operations.grey)
 			{
-				png_bytep row = row_pointers[i];
-
-				crtbuilder.decompose(imageData.at(i * 3), reds);
-				crtbuilder.decompose(imageData.at(i * 3 + 1), greens);
-				crtbuilder.decompose(imageData.at(i * 3 + 2), blues);
-
-				for(int j = 0; j < width; j++)
+				for(int i = 0; i < height; i++)
 				{
-					png_bytep px = &(row[j * 4]);
+					png_bytep row = row_pointers[i];
 
-					px[0] = reds[j];
-					px[1] = greens[j];
-					px[2] = blues[j];
+					crtbuilder.decompose(imageData.at(i * 3), reds);
+					crtbuilder.decompose(imageData.at(i * 3 + 1), greens);
+					crtbuilder.decompose(imageData.at(i * 3 + 2), blues);
+
+					for(int j = 0; j < width; j++)
+					{
+						png_bytep px = &(row[j * 4]);
+
+						px[0] = (int)reds[j]/100;
+						px[1] = (int)greens[j]/100;
+						px[2] = (int)blues[j]/100;
+					}
+				}
+			}
+			else
+			{
+				for(int i = 0; i < height; i++)
+				{
+					png_bytep row = row_pointers[i];
+
+					crtbuilder.decompose(imageData.at(i * 3), reds);
+					crtbuilder.decompose(imageData.at(i * 3 + 1), greens);
+					crtbuilder.decompose(imageData.at(i * 3 + 2), blues);
+
+					for(int j = 0; j < width; j++)
+					{
+						png_bytep px = &(row[j * 4]);
+
+						px[0] = reds[j];
+						px[1] = greens[j];
+						px[2] = blues[j];
+					}
 				}
 			}
 
-			cout << endl << "fin décodage" << endl;
+			cout << "fin décodage" << endl;
 
 			cout << "début écriture PNG" << endl;
 			write_png_file(fileName);
@@ -185,6 +214,12 @@ class ImagePlaintext
 			return retContext;
 		}
 
+		op getOperations()
+		{
+			op retOp(operations);
+			return retOp;
+		}
+
 	/**
 		renvoie un string comprenant tous les Plaintexts de l'image les uns après les autres (avec un retour à la ligne)
 	*/
@@ -201,9 +236,17 @@ class ImagePlaintext
 			return retString;
 		}
 
+		void printOperations()
+		{
+			cout << endl << boolalpha
+				<< "negation of picture : " << operations.negate << endl
+				<< "greying of picture : " << operations.grey << endl
+				<< endl;
+		}
+
 		void printParameters()
 		{
-		    cout << "/ Encryption parameters:" << endl;
+		    cout << endl << "/ Encryption parameters:" << endl;
 		    cout << "| poly_modulus: " << imageContext.poly_modulus().to_string() << endl;
 
 		    /*
@@ -221,13 +264,14 @@ class ImagePlaintext
 		SEALContext imageContext;
 		uint32_t imageHeight, imageWidth;
 		vector<Plaintext> imageData;
+		op operations;
 };
 
 
 class ImageCiphertext
 {
 	public :
-		ImageCiphertext(ImagePlaintext autre) : imageContext(autre.getContext())
+		ImageCiphertext(ImagePlaintext autre) : imageContext(autre.getContext()), operations{false, false}
 		{
 			pKey = PublicKey();
 			sKey = SecretKey();
@@ -239,7 +283,7 @@ class ImageCiphertext
 			imageWidth = autre.getWidth();
 		}
 
-		ImageCiphertext(ImageCiphertext& autre) : imageContext(autre.getContext())
+		ImageCiphertext(ImageCiphertext& autre) : imageContext(autre.getContext()), operations{false, false}
 		{
 			pKey = PublicKey();
 			sKey = SecretKey();
@@ -296,34 +340,78 @@ class ImageCiphertext
 
 			cout << "fin décryptage" << endl;
 
-			return ImagePlaintext(imageContext, imageHeight, imageWidth, decryptedData);
+			return ImagePlaintext(imageContext, imageHeight, imageWidth, operations, decryptedData);
 		}
 
 
 		bool negate()
 		{
-			uint64_t plainModulus = *imageContext.plain_modulus().pointer();
+			if(!operations.grey)
+			{
+				uint64_t plainModulus = *imageContext.plain_modulus().pointer();
 
-			int dynamiqueValeursPlain = 255;
+				int dynamiqueValeursPlain = 255;
 
+				Evaluator evaluator(imageContext);
+				PolyCRTBuilder crtbuilder(imageContext);
+
+				vector<uint64_t> reducteur(crtbuilder.slot_count(), plainModulus-dynamiqueValeursPlain);
+
+				Plaintext reduction;
+				crtbuilder.compose(reducteur, reduction);
+
+				cout << "beggining negate" << endl;
+
+				for(uint64_t i = 0; i < encryptedImageData.size(); i++)
+				{
+					evaluator.negate(encryptedImageData.at(i));
+					evaluator.sub_plain(encryptedImageData.at(i), reduction);
+				}
+
+				operations.negate = true;
+
+				cout << "end of negate" << endl;
+			}
+			else
+			{
+				cout << "negation impossible after greying" << endl;
+			}
+			
+		}
+
+		bool grey()
+		{
 			Evaluator evaluator(imageContext);
 			PolyCRTBuilder crtbuilder(imageContext);
 
-			vector<uint64_t> reducteur(crtbuilder.slot_count(), plainModulus-dynamiqueValeursPlain);
+			vector<uint64_t> redCoeff(crtbuilder.slot_count(), 21);
+			vector<uint64_t> greenCoeff(crtbuilder.slot_count(), 72);
+			vector<uint64_t> blueCoeff(crtbuilder.slot_count(), 7);
 
-			Plaintext reduction;
-			crtbuilder.compose(reducteur, reduction);
+			Plaintext redCoeffCRT, greenCoeffCRT, blueCoeffCRT;
+			Ciphertext weightedRed, weightedGreen, weightedBlue;
 
-			cout << "beggining negate" << endl;
+			crtbuilder.compose(redCoeff, redCoeffCRT);
+			crtbuilder.compose(greenCoeff, greenCoeffCRT);
+			crtbuilder.compose(blueCoeff, blueCoeffCRT);
 
-			for(uint64_t i = 0; i < encryptedImageData.size(); i++)
+			cout << "beggining greying" << endl;
+
+			for(uint64_t i=0; i<encryptedImageData.size(); i+=3)
 			{
-				evaluator.negate(encryptedImageData.at(i));
-				evaluator.sub_plain(encryptedImageData.at(i), reduction);
+				evaluator.multiply_plain(encryptedImageData.at(i), redCoeffCRT, weightedRed);
+				evaluator.multiply_plain(encryptedImageData.at(i+1), greenCoeffCRT, weightedGreen);
+				evaluator.multiply_plain(encryptedImageData.at(i+2), blueCoeffCRT, weightedBlue);
+				evaluator.add(weightedRed, weightedGreen);
+				evaluator.add(weightedRed, weightedBlue);
+				encryptedImageData.at(i) = weightedRed;
+				encryptedImageData.at(i+1) = weightedRed;
+				encryptedImageData.at(i+2) = weightedRed;
 			}
 
-			cout << "end of negate" << endl;
+			operations.grey = true;
 
+			cout << "end of greying" << endl;
 		}
 
 		bool save()
@@ -398,6 +486,20 @@ class ImageCiphertext
 			return retContext;
 		}
 
+		op getOperations()
+		{
+			op retOp(operations);
+			return retOp;
+		}
+
+		void printOperations()
+		{
+			cout << endl << boolalpha
+				<< "negation of picture : " << operations.negate << endl
+				<< "greying of picture : " << operations.grey << endl
+				<< endl;
+		}
+
 		void printParameters()
 		{
 		    cout << endl << "/ Encryption parameters:" << endl;
@@ -420,6 +522,7 @@ class ImageCiphertext
 		PublicKey pKey;
 		uint32_t imageHeight, imageWidth;
 		vector<Ciphertext> encryptedImageData;
+		op operations;
 };
 
 
@@ -448,12 +551,8 @@ int main(int argc, char* argv[])
     cout << "Batching enabled: " << boolalpha << qualifiers.enable_batching << endl;
 
 	ImagePlaintext monImage(context, argv[1]);
-
-	// ofstream outFile;
-	// outFile.open("ImagePlaintext.txt", ios::out);
-	// outFile << monImage.to_string();
-	// outFile.close();
-
+	monImage.printParameters();
+	monImage.printOperations();
 
 	ImageCiphertext imageCryptee(monImage);
 
@@ -463,9 +562,11 @@ int main(int argc, char* argv[])
 	imageCryptee.save();
 	imageLoaded.load();
 
-	imageLoaded.negate();
+	imageLoaded.grey();
+	imageLoaded.printOperations();
 
 	ImagePlaintext imageFinale = imageLoaded.decrypt();
+	imageFinale.printOperations();
 
 	imageFinale.toImage("imageNegate.png");
 

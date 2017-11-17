@@ -1,5 +1,5 @@
-BINDIR=../../../bin2.3
-SEALDIR=../../../SEAL2.3
+BINDIR=../../bin
+SEALDIR=../../SEAL
 
 CXX=g++
 CXXFLAGS=-march=native -std=c++11 
