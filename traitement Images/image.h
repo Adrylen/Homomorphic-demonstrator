@@ -198,6 +198,8 @@ class ImageCiphertext
 
 		bool verifyNormOver(float value);
 
+		void printLine(vector<uint64_t> vect);
+
 		SEALContext imageContext;
 		SecretKey sKey;
 		PublicKey pKey;

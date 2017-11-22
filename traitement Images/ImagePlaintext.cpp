@@ -94,11 +94,11 @@ bool ImagePlaintext::toImage(string fileName)
 		{
 			png_bytep px = &(row[j * 4]);
 
-			cout << "red[" << i << "][" << j << "] = " << reds[j] << "x" << normalisation[i][j][0] << endl;
+			// cout << "red[" << i << "][" << j << "] = " << reds[j] << "x" << normalisation[i][j][0] << endl;
 			px[0] = (int)reds[j]*normalisation[i][j][0];
-			cout << "green[" << i << "][" << j << "] = " << greens[j] << "x" << normalisation[i][j][1] << endl;
+			// cout << "green[" << i << "][" << j << "] = " << greens[j] << "x" << normalisation[i][j][1] << endl;
 			px[1] = (int)greens[j]*normalisation[i][j][1];
-			cout << "blue[" << i << "][" << j << "] = " << blues[j] << "x" << normalisation[i][j][2] << endl;
+			// cout << "blue[" << i << "][" << j << "] = " << blues[j] << "x" << normalisation[i][j][2] << endl;
 			px[2] = (int)blues[j]*normalisation[i][j][2];
 		}
 	}

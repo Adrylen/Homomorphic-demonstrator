@@ -154,29 +154,24 @@ bool ImageCiphertext::applyFilter(Filter filter)
 		PolyCRTBuilder crtbuilder(imageContext);
 		Evaluator evaluator(imageContext);
 		vector<Ciphertext> newEncryptedData(imageHeight*3, Ciphertext());
-		Ciphertext resultPixel, tampon;
+		vector<Ciphertext> pixelResults;
+		Ciphertext resultPixel;
 		Plaintext selectorPlain;
 
 		for(int x = 0; x < imageHeight; x++)	//travaille sur chaque ligne de l'image 
 		{
-			for(int y = 0; y < imageWidth; y++) //travaille sur chaque pixel 
+			for(int colorLayer = 0; colorLayer < 3; colorLayer++) //travaille sur chaque layer de couleur 
 			{
-				for(int colorLayer = 0; colorLayer < 3; colorLayer++)	//travaille sur chaque layer de color
+				pixelResults.clear();
+
+				for(int y = 0; y < imageWidth; y++)	//travaille sur chaque pixel de la ligne courante
 				{
-					resultPixel = convolute(x, y, colorLayer, filter);
-					vector<uint64_t> selector(crtbuilder.slot_count(), 1);
-
-					selector[y] = 0;
-					crtbuilder.compose(selector, selectorPlain);
-
-					evaluator.multiply_plain(encryptedImageData[x*3+colorLayer], selectorPlain, tampon);
-
-					evaluator.add(tampon, resultPixel, newEncryptedData[x*3+colorLayer]);
+					pixelResults.push_back(convolute(x, y, colorLayer, filter));
 				}
-				cout << "*";
-				cout.flush();
+
+				evaluator.add_many(pixelResults, newEncryptedData[x*3+colorLayer]);
 			}
-			cout << " " << x+1 << " lignes sur " << imageHeight << endl;
+			cout << x+1 << " lignes sur " << imageHeight << endl;
 		}
 
 		encryptedImageData = newEncryptedData;
@@ -257,6 +252,7 @@ void ImageCiphertext::printParameters()
 
 Ciphertext ImageCiphertext::addRows(Ciphertext cipher, int position, int min, int max)
 {
+	// cout << "		addRows from " << min << " to " << max << " on position " << position << endl;
     Evaluator evaluator(imageContext);
     PolyCRTBuilder crtbuilder(imageContext);
 
@@ -269,11 +265,13 @@ Ciphertext ImageCiphertext::addRows(Ciphertext cipher, int position, int min, in
         if(coeff == position) continue;
 
         //selection du coefficient
+        // cout << "		selecting coefficient number " << coeff;
         selector[coeff] = 1;
         crtbuilder.compose(selector, selectorPlain);
         evaluator.multiply_plain(cipher, selectorPlain, tampon);
 
         //shift du coefficient sur le slot position
+        // cout << " and shifting by " << coeff-position << endl;
         evaluator.rotate_rows(tampon, (coeff-position), gKey);    //on donne le cipher, le nombre de shifts à faire (positif = gauche (?)) et la clé de shift
 
         //on additionne les deux cipher, avec les coeffs 1 et 2 du cipher maintenant à la même position dans cipher et tampon
@@ -288,6 +286,8 @@ Ciphertext ImageCiphertext::addRows(Ciphertext cipher, int position, int min, in
 
 Ciphertext ImageCiphertext::convolute(int x, int y, int colorLayer, Filter filter)
 {
+	// cout << "	convoluting pixel [" << x << "][" << y << "] on layer " << colorLayer << endl;
+
 	int sum = 0;
 
 	Encryptor encryptor(imageContext, pKey);
@@ -314,8 +314,12 @@ Ciphertext ImageCiphertext::convolute(int x, int y, int colorLayer, Filter filte
 		for(int yOffset = YBegin; yOffset <= YEnd; yOffset++)	//travaille par colonne
 		{
 			selector[y+yOffset] = filter.getValue(verticalOffset + xOffset, horizontalOffset + yOffset);	//horizontal et vertical Offset sont aussi le milleu du tableau filter
+			
 			sum += filter.getValue(verticalOffset + xOffset, horizontalOffset + yOffset);
 		}
+		// cout << "	selector : ";
+		// printLine(selector);
+		// cout << endl << "	taking line n°" << (x+xOffset)*3 + colorLayer << endl;
 		crtbuilder.compose(selector, selectorPlain);
 		evaluator.multiply_plain(encryptedImageData[(x+xOffset)*3 + colorLayer], selectorPlain, tampon);
 		tampons.push_back(tampon);
@@ -406,4 +410,14 @@ bool ImageCiphertext::verifyNormOver(float value)
 	}
 
 	return result;
+}
+
+void ImageCiphertext::printLine(vector<uint64_t> vect)
+{
+	cout << "[";
+	for(int i = 0; i < imageWidth; i++)
+	{
+		cout << vect[i] << " ";
+	}
+	cout << "]";
 }
