@@ -6,6 +6,7 @@
 #include <seal/seal.h>
 #include "png-util.h"
 #include "filter.cpp"
+#include "ciphertextImage.h"
 
 using namespace std;
 using namespace seal;
@@ -31,11 +32,12 @@ class ImagePlaintext
 	/**
 		contructeur utilisé pour copier les données décryptées d'un objet ImageCiphertext dans un objet de type ImagePlaintext
 	*/
-		ImagePlaintext(const SEALContext &context, uint32_t height, uint32_t width, float normalisation, vector<Plaintext> data) : imageContext(context)
+		ImagePlaintext(const SEALContext &context, uint32_t height, uint32_t width, float **normalisation, vector<Plaintext> data) : imageContext(context)
 		{
-			this->normalisation = normalisation;
 			imageHeight = height;
 			imageWidth = width;
+			initNorm();
+			copyNorm(normalisation);
 
 			for(int i = 0; i < data.size(); i++)
 			{
@@ -124,9 +126,12 @@ class ImagePlaintext
 				{
 					png_bytep px = &(row[j * 4]);
 
-					px[0] = (int)reds[j]*normalisation;
-					px[1] = (int)greens[j]*normalisation;
-					px[2] = (int)blues[j]*normalisation;
+					cout << "red[" << i << "][" << j << "] = " << reds[j] << "x" << normalisation[i][j] << endl;
+					px[0] = (int)reds[j]*normalisation[i][j];
+					cout << "green[" << i << "][" << j << "] = " << greens[j] << "x" << normalisation[i][j] << endl;
+					px[1] = (int)greens[j]*normalisation[i][j];
+					cout << "blue[" << i << "][" << j << "] = " << blues[j] << "x" << normalisation[i][j] << endl;
+					px[2] = (int)blues[j]*normalisation[i][j];
 				}
 			}
 
@@ -141,7 +146,7 @@ class ImagePlaintext
 
 	/**
 		revoie la taille u vecteur contenant les données de l'image
-		(revoie le nombre de Plaintexts, soit le nombre de lignes de l'image fois trois)
+		(renvoie le nombre de Plaintexts, soit le nombre de lignes de l'image fois trois)
 	*/
 		uint32_t getDataSize()
 		{
@@ -221,8 +226,30 @@ class ImagePlaintext
 		}
 
 	private : 
+		void initNorm()
+		{
+			normalisation = (float**) malloc(imageHeight*sizeof(*normalisation));
+
+			for(int i = 0; i < imageHeight; i++)
+			{
+				normalisation[i] = (float*) malloc(imageWidth*sizeof(**normalisation));
+			}
+		}
+
+		void copyNorm(float **norm)
+		{
+			for(int i = 0; i < imageHeight; i++)
+			{
+				for(int j = 0; j < imageWidth; j++)
+				{
+					normalisation[i][j] = norm[i][j];
+				}
+			}
+		}
+
+
 		SEALContext imageContext;
 		uint32_t imageHeight, imageWidth;
 		vector<Plaintext> imageData;
-		float normalisation;
+		float **normalisation;
 };
