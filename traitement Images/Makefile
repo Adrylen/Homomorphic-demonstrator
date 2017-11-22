@@ -4,6 +4,7 @@ SEALDIR=../SEAL
 CXX=g++
 SOURCE=ImageCiphertext.cpp
 SOURCE+=ImagePlaintext.cpp
+SOURCE+=filter.cpp
 CXXFLAGS=-march=native -std=c++11 
 INCLUDES=$(addprefix -I,$(SEALDIR))
 LIB=$(addprefix -L,$(BINDIR)) -lseal -lpng
