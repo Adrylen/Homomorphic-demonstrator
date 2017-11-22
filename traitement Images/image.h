@@ -4,7 +4,7 @@
 #include <vector>
 
 #include <seal/seal.h>
-#include "filter.cpp"
+#include "filter.h"
 
 using namespace std;
 using namespace seal;
