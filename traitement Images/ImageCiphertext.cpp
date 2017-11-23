@@ -166,7 +166,7 @@ bool ImageCiphertext::applyFilter(Filter filter)
 
 				for(int y = 0; y < imageWidth; y++)	//travaille sur chaque pixel de la ligne courante
 				{
-					pixelResults.push_back(convolute(x, y, colorLayer, filter));
+					pixelResults.push_back(convolute2(x, y, colorLayer, filter));
 				}
 
 				evaluator.add_many(pixelResults, newEncryptedData[x*3+colorLayer]);
@@ -245,7 +245,6 @@ void ImageCiphertext::printParameters()
 }
 
 
-
 //###########################################################################################################
 //####################################### private classes ###################################################
 //###########################################################################################################
@@ -265,13 +264,11 @@ Ciphertext ImageCiphertext::addRows(Ciphertext cipher, int position, int min, in
         if(coeff == position) continue;
 
         //selection du coefficient
-        // cout << "		selecting coefficient number " << coeff;
         selector[coeff] = 1;
         crtbuilder.compose(selector, selectorPlain);
         evaluator.multiply_plain(cipher, selectorPlain, tampon);
 
         //shift du coefficient sur le slot position
-        // cout << " and shifting by " << coeff-position << endl;
         evaluator.rotate_rows(tampon, (coeff-position), gKey);    //on donne le cipher, le nombre de shifts à faire (positif = gauche (?)) et la clé de shift
 
         //on additionne les deux cipher, avec les coeffs 1 et 2 du cipher maintenant à la même position dans cipher et tampon
@@ -286,8 +283,6 @@ Ciphertext ImageCiphertext::addRows(Ciphertext cipher, int position, int min, in
 
 Ciphertext ImageCiphertext::convolute(int x, int y, int colorLayer, Filter filter)
 {
-	// cout << "	convoluting pixel [" << x << "][" << y << "] on layer " << colorLayer << endl;
-
 	int sum = 0;
 
 	Encryptor encryptor(imageContext, pKey);
@@ -317,9 +312,6 @@ Ciphertext ImageCiphertext::convolute(int x, int y, int colorLayer, Filter filte
 			
 			sum += filter.getValue(verticalOffset + xOffset, horizontalOffset + yOffset);
 		}
-		// cout << "	selector : ";
-		// printLine(selector);
-		// cout << endl << "	taking line n°" << (x+xOffset)*3 + colorLayer << endl;
 		crtbuilder.compose(selector, selectorPlain);
 		evaluator.multiply_plain(encryptedImageData[(x+xOffset)*3 + colorLayer], selectorPlain, tampon);
 		tampons.push_back(tampon);
@@ -338,7 +330,171 @@ Ciphertext ImageCiphertext::convolute(int x, int y, int colorLayer, Filter filte
 
 	normalisation[x][y][colorLayer] *= (float)1/sum;	//on actualise l'offset de normalisation sur le pixel traité
 
-	// cout << "sum : " << sum << " normalisation : " << normalisation[x][y][colorLayer] << endl;
+	return result;
+}
+
+/*Ciphertext ImageCiphertext::convolute2(int x, int y, int colorLayer, Filter filter)	//code marche, sauf sur les bords
+{
+	int sum = 0;
+
+	Encryptor encryptor(imageContext, pKey);
+	Evaluator evaluator(imageContext);
+	PolyCRTBuilder crtbuilder(imageContext);
+
+	Plaintext selectorPlain;
+	vector<Ciphertext> tampons;
+
+	int verticalOffset = (int) filter.getHeight()/2;
+	int horizontalOffset = (int) filter.getWidth()/2;
+
+	int XBegin, XEnd, YBegin, YEnd;
+	(x < verticalOffset) ? (XBegin = -x) : (XBegin = -verticalOffset);
+	(y < horizontalOffset) ? (YBegin = -y) : (YBegin = -horizontalOffset);
+	(x < (imageHeight - verticalOffset)) ? (XEnd = verticalOffset) : (XEnd = (imageHeight - 1 - x));
+	(y < (imageWidth - horizontalOffset)) ? (YEnd = horizontalOffset) : (YEnd = (imageWidth - 1 - y));
+
+	for(int xOffset = XBegin; xOffset <= XEnd; xOffset++)		//travaille par ligne
+	{
+		vector<Ciphertext> pixelsLine;
+		Ciphertext line;
+
+		for(int yOffset = YBegin; yOffset <= YEnd; yOffset++)	//travaille par colonne
+		{
+			Ciphertext tampon;
+			vector<uint64_t> selector(crtbuilder.slot_count(), 0);
+
+			int mult = filter.getValue(verticalOffset + xOffset, horizontalOffset + yOffset);
+
+			sum += mult;
+
+			// cout << "mult : " << mult;
+
+			(mult < 0) ? (selector[y+yOffset] = -mult) : (selector[y+yOffset] = mult);
+
+			// cout << ", selector[y+yOffset] : " << selector[y+yOffset] << endl;
+
+			crtbuilder.compose(selector, selectorPlain);
+			if( mult != 0)
+			{
+				if(mult < 0)
+				{
+					evaluator.negate(encryptedImageData[(x+xOffset)*3 + colorLayer], tampon);
+					evaluator.multiply_plain(tampon, selectorPlain);
+				}
+				else if(mult > 0)
+				{
+					evaluator.multiply_plain(encryptedImageData[(x+xOffset)*3 + colorLayer], selectorPlain, tampon);
+				}
+
+				pixelsLine.push_back(tampon);
+			}
+			
+		}
+		evaluator.add_many(pixelsLine, line);
+
+		tampons.push_back(line);
+	}
+
+	Ciphertext partialResult, result;
+	evaluator.add_many(tampons, partialResult);		//ajoute les valeurs de chaque ligne dans une seule
+
+	result = addRows(partialResult, y, y+YBegin, y+YEnd);	//ajoute les valeurs de chaque colonne dans une seule
+	//result contient donc en y la somme de toutes les valeurs coefficientées par filter, mais contient également des sommes autour
+
+	vector<uint64_t> selectorNew(crtbuilder.slot_count(), 0);	//permet de ne selectionner que le membre de result en Y qui nous intéresse
+	selectorNew[y] = 1;	
+	crtbuilder.compose(selectorNew, selectorPlain);
+	evaluator.multiply_plain(result, selectorPlain);	//on sélectionne le membre du résult qui nous intéresse, et on supprime tous les autres
+
+	if(sum != 0)
+	{
+		normalisation[x][y][colorLayer] *= (float)1/sum;	//on actualise l'offset de normalisation sur le pixel traité
+	}
+
+	return result;
+}*/
+
+Ciphertext ImageCiphertext::convolute2(int x, int y, int colorLayer, Filter filter)
+{
+	int sum = 0;
+
+	Encryptor encryptor(imageContext, pKey);
+	Evaluator evaluator(imageContext);
+	PolyCRTBuilder crtbuilder(imageContext);
+
+	Plaintext selectorPlain;
+	vector<Ciphertext> tampons;
+
+	int verticalOffset = (int) filter.getHeight()/2;
+	int horizontalOffset = (int) filter.getWidth()/2;
+
+	for(int xOffset = -verticalOffset; xOffset <= verticalOffset; xOffset++)		//travaille par ligne
+	{
+		vector<Ciphertext> pixelsLine;
+		Ciphertext line;
+		int currentX;
+
+		((x + xOffset) < 0) ? (currentX = 0) : (((x+xOffset) > imageHeight - 1) ? (currentX = imageHeight - 1) : (currentX = x + xOffset));
+
+		for(int yOffset = -horizontalOffset; yOffset <= horizontalOffset; yOffset++)	//travaille par colonne
+		{
+			Ciphertext tampon;
+			vector<uint64_t> selector(crtbuilder.slot_count(), 0);
+			int currentY;
+
+			((y + yOffset) < 0) ? (currentY = 0) : (((y+yOffset) > imageWidth - 1) ? (currentY = imageWidth - 1) : (currentY = y + yOffset));
+
+			int mult = filter.getValue(verticalOffset + xOffset, horizontalOffset + yOffset);
+
+			sum += mult;
+
+			// cout << "mult : " << mult;
+
+			(mult < 0) ? (selector[currentY] = -mult) : (selector[currentY] = mult);
+
+			// cout << ", selector[y+yOffset] : " << selector[y+yOffset] << endl;
+
+			crtbuilder.compose(selector, selectorPlain);
+			if( mult != 0)
+			{
+				if(mult < 0)
+				{
+					evaluator.negate(encryptedImageData[(currentX)*3 + colorLayer], tampon);
+					evaluator.multiply_plain(tampon, selectorPlain);
+				}
+				else if(mult > 0)
+				{
+					evaluator.multiply_plain(encryptedImageData[(currentX)*3 + colorLayer], selectorPlain, tampon);
+				}
+
+				pixelsLine.push_back(tampon);
+			}
+			
+		}
+		evaluator.add_many(pixelsLine, line);
+
+		tampons.push_back(line);
+	}
+
+	Ciphertext partialResult, result;
+	evaluator.add_many(tampons, partialResult);		//ajoute les valeurs de chaque ligne dans une seule
+
+	int YBegin, YEnd;
+	(y < horizontalOffset) ? (YBegin = -y) : (YBegin = -horizontalOffset);
+	(y < (imageWidth - horizontalOffset)) ? (YEnd = horizontalOffset) : (YEnd = (imageWidth - 1 - y));
+
+	result = addRows(partialResult, y, y+YBegin, y+YEnd);	//ajoute les valeurs de chaque colonne dans une seule
+	//result contient donc en y la somme de toutes les valeurs coefficientées par filter, mais contient également des sommes autour
+
+	vector<uint64_t> selectorNew(crtbuilder.slot_count(), 0);	//permet de ne selectionner que le membre de result en Y qui nous intéresse
+	selectorNew[y] = 1;	
+	crtbuilder.compose(selectorNew, selectorPlain);
+	evaluator.multiply_plain(result, selectorPlain);	//on sélectionne le membre du résult qui nous intéresse, et on supprime tous les autres
+
+	if(sum != 0)
+	{
+		normalisation[x][y][colorLayer] *= (float)1/sum;	//on actualise l'offset de normalisation sur le pixel traité
+	}
 
 	return result;
 }

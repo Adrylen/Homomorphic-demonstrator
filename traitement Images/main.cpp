@@ -44,20 +44,27 @@ int main(int argc, char* argv[])
 	imageCryptee.save("~Ciphertext");
 	imageLoaded.load("~Ciphertext");
 
-	int schemaFiltre[9] = 
+	int schemaFiltre1[9] = 
+    {
+        0, 1, 0,
+        1, -4, 1,
+        0, 1, 0
+    };
+    vector<int> filtreVec1(schemaFiltre1, schemaFiltre1 + sizeof(schemaFiltre1)/sizeof(int));
+    Filter filtreContours(3, 3, filtreVec1);
+
+    int schemaFiltre2[9] = 
     {
         1, 1, 1,
         1, 1, 1,
         1, 1, 1
     };
-
-    vector<int> filtreVec(schemaFiltre, schemaFiltre + sizeof(schemaFiltre)/sizeof(int));
-
-    Filter filtre(3, 3, filtreVec);
+    vector<int> filtreVec2(schemaFiltre2, schemaFiltre2 + sizeof(schemaFiltre2)/sizeof(int));
+    Filter filtreFlou(3, 3, filtreVec2);
 
     // imageLoaded.negate();
 	// imageLoaded.grey();
-	imageLoaded.applyFilter(filtre);
+	imageLoaded.applyFilter(filtreContours);
 
 	imageLoaded.save("~CiphertextFiltered");
 

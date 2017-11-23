@@ -192,6 +192,8 @@ class ImageCiphertext
 
 		Ciphertext convolute(int x, int y, int colorLayer, Filter filter);
 
+		Ciphertext convolute2(int x, int y, int colorLayer, Filter filter);
+
 		void initNorm();
 
 		void updateNorm(float value);
