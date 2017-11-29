@@ -36,7 +36,7 @@ bool ImageCiphertext::generateKeys()
     pKey = generator.public_key();
     generator.generate_galois_keys(30, gKey);	//attention, le DBC (premier paramètre) devra être adapté en fonction des opérations
 
-    cout << "keys generated successfully" << endl;
+    cout << "keys generated successfully" << endl << endl;
 }
 
 bool ImageCiphertext::encrypt(ImagePlaintext autre)
@@ -48,13 +48,17 @@ bool ImageCiphertext::encrypt(ImagePlaintext autre)
 
 	cout << "début du cryptage image" << endl;
 
+	auto timeStart = chrono::high_resolution_clock::now();
+
 	for(uint64_t i = 0; i < autre.getDataSize(); i++)
 	{
 		encryptor.encrypt(autre.getDataAt(i), cipherTampon);
 		encryptedImageData.push_back(cipherTampon);
 	}
 
-	cout << "fin du cryptage" << endl;
+	auto timeStop = chrono::high_resolution_clock::now();
+
+	cout << "--> fin du cryptage: " << chrono::duration_cast<chrono::milliseconds>(timeStop - timeStart).count() << " milliseconds" << endl << endl;
 }
 
 ImagePlaintext ImageCiphertext::decrypt()
@@ -65,13 +69,17 @@ ImagePlaintext ImageCiphertext::decrypt()
 
 	cout << "début du décryptage image" << endl;
 
+	auto timeStart = chrono::high_resolution_clock::now();
+
 	for(uint64_t i = 0; i < encryptedImageData.size(); i++)
 	{
 		decryptor.decrypt(encryptedImageData.at(i), plainTampon);
 		decryptedData.push_back(plainTampon);
 	}
 
-	cout << "fin décryptage" << endl;
+	auto timeStop = chrono::high_resolution_clock::now();
+
+	cout << "--> fin décryptage: " << chrono::duration_cast<chrono::milliseconds>(timeStop - timeStart).count() << " milliseconds" << endl << endl;
 
 	return ImagePlaintext(imageContext, imageHeight, imageWidth, normalisation, decryptedData);
 }
@@ -94,13 +102,17 @@ bool ImageCiphertext::negate()
 
 		cout << "beggining negate" << endl;
 
+		auto timeStart = chrono::high_resolution_clock::now();
+
 		for(uint64_t i = 0; i < encryptedImageData.size(); i++)
 		{
 			evaluator.negate(encryptedImageData.at(i));
 			evaluator.sub_plain(encryptedImageData.at(i), reduction);
 		}
 
-		cout << "end of negate" << endl;
+		auto timeStop = chrono::high_resolution_clock::now();
+
+		cout << "--> end of negate: " << chrono::duration_cast<chrono::milliseconds>(timeStop - timeStart).count() << " milliseconds" << endl << endl;
 	}
 	else
 	{
@@ -127,6 +139,8 @@ bool ImageCiphertext::grey()
 
 	cout << "beggining greying" << endl;
 
+	auto timeStart = chrono::high_resolution_clock::now();
+
 	for(uint64_t i=0; i<encryptedImageData.size(); i+=3)
 	{
 		evaluator.multiply_plain(encryptedImageData.at(i), redCoeffCRT, weightedRed);
@@ -141,22 +155,27 @@ bool ImageCiphertext::grey()
 
 	updateNorm(0.01);
 
-	cout << "end of greying" << endl;
+	auto timeStop = chrono::high_resolution_clock::now();
+
+	cout << "--> end of greying: " << chrono::duration_cast<chrono::milliseconds>(timeStop - timeStart).count() << " milliseconds" << endl << endl;
 }
 
 bool ImageCiphertext::applyFilter(Filter filter)
 {
 	if(filter.validate() && getNoiseBudget() > 0)
 	{
-		cout << "applying filter :" << endl;
-		filter.print();
+		int instantProgress = 0;
+		int progressPercentage = 0;
 
 		PolyCRTBuilder crtbuilder(imageContext);
 		Evaluator evaluator(imageContext);
 		vector<Ciphertext> newEncryptedData(imageHeight*3, Ciphertext());
 		vector<Ciphertext> pixelResults;
-		Ciphertext resultPixel;
-		Plaintext selectorPlain;
+
+		cout << "applying filter :" << endl;
+		filter.print();
+
+		auto timeStart = chrono::high_resolution_clock::now();
 
 		for(int x = 0; x < imageHeight; x++)	//travaille sur chaque ligne de l'image 
 		{
@@ -167,21 +186,100 @@ bool ImageCiphertext::applyFilter(Filter filter)
 				for(int y = 0; y < imageWidth; y++)	//travaille sur chaque pixel de la ligne courante
 				{
 					pixelResults.push_back(convolute2(x, y, colorLayer, filter));
+
+					instantProgress++;
+					int currentProgressPercentage = (int)(((float)instantProgress/(imageWidth*imageHeight*3))*100);
+					if(currentProgressPercentage != progressPercentage)
+					{
+						progressPercentage = currentProgressPercentage;
+						cout << "\t[ " << progressPercentage << "% ] \r";
+						cout.flush();
+					}
 				}
 
 				evaluator.add_many(pixelResults, newEncryptedData[x*3+colorLayer]);
 			}
-			cout << x+1 << " lignes sur " << imageHeight << endl;
 		}
 
+		encryptedImageData.clear();
 		encryptedImageData = newEncryptedData;
+
+		auto timeStop = chrono::high_resolution_clock::now();
+
+		cout << "--> filtering finished: " << chrono::duration_cast<chrono::seconds>(timeStop - timeStart).count() << " seconds" << endl << endl;
+	}
+}
+
+bool ImageCiphertext::applyFilterThreaded(Filter filter, int numThread)
+{
+	if(filter.validate() && getNoiseBudget() > 0)
+	{
+		PolyCRTBuilder crtbuilder(imageContext);
+		Evaluator evaluator(imageContext);
+		vector<Ciphertext> newEncryptedData(imageHeight*3, Ciphertext());
+
+
+		auto calculatePart = [&crtbuilder, &evaluator, &newEncryptedData, this](int threadIndex, Filter filter, mutex &rmtx, mutex &wmtx, int xBegin, int xEnd, const MemoryPoolHandle &pool)
+		{
+			vector<Ciphertext> pixelResults;
+
+			while(!wmtx.try_lock());
+			cout << "thread n°" << threadIndex << " beginning calculations from line " << xBegin << " to line " << xEnd << endl;
+			wmtx.unlock();
+
+			for(int x = xBegin; x <= xEnd; x++)	//travaille sur chaque ligne de l'image 
+			{
+				for(int colorLayer = 0; colorLayer < 3; colorLayer++) //travaille sur chaque layer de couleur 
+				{
+					pixelResults.clear();
+
+					for(int y = 0; y < imageWidth; y++)	//travaille sur chaque pixel de la ligne courante
+					{
+						pixelResults.push_back(convolute2Threaded(imageContext, imageHeight, imageWidth, x, y, colorLayer, filter, ref(rmtx), pool));
+					}
+
+					while(!wmtx.try_lock());
+					evaluator.add_many(pixelResults, newEncryptedData[x*3+colorLayer]);
+					wmtx.unlock();
+				}
+			}
+		};
+		
+		mutex readMutex, writeMutex;
+		vector<thread> threads;
+
+		int i;
+		int xByThread = (int)imageHeight/numThread;
+
+		cout << "applying filter :" << endl;
+		filter.print();
+
+		auto timeStart = chrono::high_resolution_clock::now();
+
+		for(i = 0; i < numThread-1; i++)
+		{
+			threads.emplace_back(calculatePart, i+1, filter, ref(readMutex), ref(writeMutex), i*xByThread, (i+1)*xByThread-1, MemoryPoolHandle::New(false));
+		}
+		threads.emplace_back(calculatePart, i+1, filter, ref(readMutex), ref(writeMutex), i*xByThread, imageHeight-1, MemoryPoolHandle::New(false));
+
+		for(int j = 0; j < threads.size(); j++)
+		{
+			threads[j].join();
+		}
+
+		encryptedImageData.clear();
+		encryptedImageData = newEncryptedData;
+
+		auto timeStop = chrono::high_resolution_clock::now();
+
+		cout << "filtering finished: " << chrono::duration_cast<chrono::seconds>(timeStop - timeStart).count() << " seconds" << endl << endl;
 	}
 }
 
 bool ImageCiphertext::save(string fileName)
 {
 
-	cout << "début de sauvegarde du fichier crypté" << endl;
+	cout << "sauvegarde du fichier crypté '" << fileName << "'" << endl << endl;
 
 	ofstream fileBin;
 	fileBin.open(fileName, ios::out | ios::binary);
@@ -194,13 +292,11 @@ bool ImageCiphertext::save(string fileName)
 		encryptedImageData.at(i).save(fileBin);
 	}
 	fileBin.close();
-
-	cout << "fin de la sauvegarde" << endl;
 }
 
 bool ImageCiphertext::load(string fileName)
 {
-	cout << "début de chargement du fichier crypté" << endl;
+	cout << "chargement du fichier crypté '" << fileName << "'" << endl << endl;
 
 	ifstream fileBin;
 	fileBin.open(fileName, ios::in | ios::binary);
@@ -213,8 +309,6 @@ bool ImageCiphertext::load(string fileName)
 		encryptedImageData.at(i).load(fileBin);
 	}
 	fileBin.close();
-
-	cout << "fin du chargement" << endl;
 }
 
 int ImageCiphertext::getNoiseBudget()
@@ -222,7 +316,7 @@ int ImageCiphertext::getNoiseBudget()
 	Decryptor decryptor(imageContext, sKey);
 	int noise =  decryptor.invariant_noise_budget(encryptedImageData[imageHeight]);	//renvoie une valeur parmis les ciphertexts de l'image
 
-	cout << "current Noise Budget : " << noise << " bits" << endl;
+	cout << "current Noise Budget : " << noise << " bits" << endl << endl;
 
 	return	noise;
 	//normalement tous les ciphertexts ont le même bruit, puisqu'on ne fait pas encore de filtre à un certain endroit de l'image
@@ -240,8 +334,7 @@ void ImageCiphertext::printParameters()
         << imageContext.total_coeff_modulus().significant_bit_count() << " bits" << endl;
 
     cout << "| plain_modulus: " << imageContext.plain_modulus().value() << endl;
-    cout << "\\ noise_standard_deviation: " << imageContext.noise_standard_deviation() << endl;
-    cout << endl;
+    cout << "\\ noise_standard_deviation: " << imageContext.noise_standard_deviation() << endl << endl;
 }
 
 
@@ -249,15 +342,15 @@ void ImageCiphertext::printParameters()
 //####################################### private classes ###################################################
 //###########################################################################################################
 
-Ciphertext ImageCiphertext::addRows(Ciphertext cipher, int position, int min, int max)
+Ciphertext ImageCiphertext::addRows(Ciphertext cipher, int position, int min, int max, const MemoryPoolHandle &pool)
 {
 	// cout << "		addRows from " << min << " to " << max << " on position " << position << endl;
     Evaluator evaluator(imageContext);
     PolyCRTBuilder crtbuilder(imageContext);
 
     vector<uint64_t> selector(crtbuilder.slot_count(), 0);
-    Ciphertext tampon;
-    Plaintext selectorPlain;
+    Ciphertext tampon(pool);
+    Plaintext selectorPlain(pool);
     
     for(int coeff = min; coeff <= max; coeff++)
     {
@@ -266,10 +359,10 @@ Ciphertext ImageCiphertext::addRows(Ciphertext cipher, int position, int min, in
         //selection du coefficient
         selector[coeff] = 1;
         crtbuilder.compose(selector, selectorPlain);
-        evaluator.multiply_plain(cipher, selectorPlain, tampon);
+        evaluator.multiply_plain(cipher, selectorPlain, tampon, pool);
 
         //shift du coefficient sur le slot position
-        evaluator.rotate_rows(tampon, (coeff-position), gKey);    //on donne le cipher, le nombre de shifts à faire (positif = gauche (?)) et la clé de shift
+        evaluator.rotate_rows(tampon, (coeff-position), gKey, pool);    //on donne le cipher, le nombre de shifts à faire (positif = gauche (?)) et la clé de shift
 
         //on additionne les deux cipher, avec les coeffs 1 et 2 du cipher maintenant à la même position dans cipher et tampon
         evaluator.add(cipher, tampon);
@@ -320,7 +413,7 @@ Ciphertext ImageCiphertext::convolute(int x, int y, int colorLayer, Filter filte
 	Ciphertext partialResult, result;
 	evaluator.add_many(tampons, partialResult);		//ajoute les valeurs de chaque ligne dans une seule
 
-	result = addRows(partialResult, y, y+YBegin, y+YEnd);	//ajoute les valeurs de chaque colonne dans une seule
+	result = addRows(partialResult, y, y+YBegin, y+YEnd, MemoryPoolHandle::Global());	//ajoute les valeurs de chaque colonne dans une seule
 	//result contient donc en y la somme de toutes les valeurs coefficientées par filter, mais contient également des sommes autour
 
 	vector<uint64_t> selectorNew(crtbuilder.slot_count(), 0);	//permet de ne selectionner que le membre de result en Y qui nous intéresse
@@ -338,7 +431,6 @@ Ciphertext ImageCiphertext::convolute2(int x, int y, int colorLayer, Filter filt
 {
 	int sum = 0;
 
-	Encryptor encryptor(imageContext, pKey);
 	Evaluator evaluator(imageContext);
 	PolyCRTBuilder crtbuilder(imageContext);
 
@@ -403,7 +495,7 @@ Ciphertext ImageCiphertext::convolute2(int x, int y, int colorLayer, Filter filt
 	(y < horizontalOffset) ? (YBegin = -y) : (YBegin = -horizontalOffset);
 	(y < (imageWidth - horizontalOffset)) ? (YEnd = horizontalOffset) : (YEnd = (imageWidth - 1 - y));
 
-	result = addRows(partialResult, y, y+YBegin, y+YEnd);	//ajoute les valeurs de chaque colonne dans une seule
+	result = addRows(partialResult, y, y+YBegin, y+YEnd, MemoryPoolHandle::Global());	//ajoute les valeurs de chaque colonne dans une seule
 	//result contient donc en y la somme de toutes les valeurs coefficientées par filter, mais contient également des sommes autour
 
 	vector<uint64_t> selectorNew(crtbuilder.slot_count(), 0);	//permet de ne selectionner que le membre de result en Y qui nous intéresse
@@ -414,6 +506,96 @@ Ciphertext ImageCiphertext::convolute2(int x, int y, int colorLayer, Filter filt
 	if(sum != 0)
 	{
 		normalisation[x][y][colorLayer] *= (float)1/sum;	//on actualise l'offset de normalisation sur le pixel traité
+	}
+
+	return result;
+}
+
+Ciphertext ImageCiphertext::convolute2Threaded(SEALContext context, int height, int width, int x, int y, int colorLayer, Filter filter, mutex &rmtx, const MemoryPoolHandle &pool)
+{
+	int sum = 0;
+
+	Evaluator evaluator(context);
+	PolyCRTBuilder crtbuilder(context);
+
+	Plaintext selectorPlain(pool);
+	vector<Ciphertext> tampons;
+
+	int verticalOffset = (int) filter.getHeight()/2;
+	int horizontalOffset = (int) filter.getWidth()/2;
+
+	for(int xOffset = -verticalOffset; xOffset <= verticalOffset; xOffset++)		//travaille par ligne
+	{
+		vector<Ciphertext> pixelsLine;
+		Ciphertext line(pool);
+		int currentX;
+
+		((x + xOffset) < 0) ? (currentX = 0) : (((x+xOffset) > height - 1) ? (currentX = height - 1) : (currentX = x + xOffset));
+
+		for(int yOffset = -horizontalOffset; yOffset <= horizontalOffset; yOffset++)	//travaille par colonne
+		{
+			Ciphertext tampon(pool), data(pool);
+			vector<uint64_t> selector(crtbuilder.slot_count(), 0);
+			int currentY;
+
+			((y + yOffset) < 0) ? (currentY = 0) : (((y+yOffset) > width - 1) ? (currentY = width - 1) : (currentY = y + yOffset));
+
+			int mult = filter.getValue(verticalOffset + xOffset, horizontalOffset + yOffset);
+
+			sum += mult;
+
+			// cout << "mult : " << mult;
+
+			(mult < 0) ? (selector[currentY] = -mult) : (selector[currentY] = mult);
+
+			// cout << ", selector[y+yOffset] : " << selector[y+yOffset] << endl;
+
+			crtbuilder.compose(selector, selectorPlain);
+			if( mult != 0)
+			{
+				while(!rmtx.try_lock());
+				data = encryptedImageData[(currentX)*3 + colorLayer];
+				rmtx.unlock();
+
+				if(mult < 0)
+				{
+					evaluator.negate(data, tampon);
+					evaluator.multiply_plain(tampon, selectorPlain, pool);
+				}
+				else if(mult > 0)
+				{
+					evaluator.multiply_plain(data, selectorPlain, tampon, pool);
+				}
+
+				pixelsLine.push_back(tampon);
+			}
+			
+		}
+		evaluator.add_many(pixelsLine, line);
+
+		tampons.push_back(line);
+	}
+
+	Ciphertext partialResult(pool), result(pool);
+	evaluator.add_many(tampons, partialResult);		//ajoute les valeurs de chaque ligne dans une seule
+
+	int YBegin, YEnd;
+	(y < horizontalOffset) ? (YBegin = -y) : (YBegin = -horizontalOffset);
+	(y < (width - horizontalOffset)) ? (YEnd = horizontalOffset) : (YEnd = (width - 1 - y));
+
+	result = addRows(partialResult, y, y+YBegin, y+YEnd, pool);	//ajoute les valeurs de chaque colonne dans une seule
+	//result contient donc en y la somme de toutes les valeurs coefficientées par filter, mais contient également des sommes autour
+
+	vector<uint64_t> selectorNew(crtbuilder.slot_count(), 0);	//permet de ne selectionner que le membre de result en Y qui nous intéresse
+	selectorNew[y] = 1;	
+	crtbuilder.compose(selectorNew, selectorPlain);
+	evaluator.multiply_plain(result, selectorPlain, pool);	//on sélectionne le membre du résult qui nous intéresse, et on supprime tous les autres
+
+	if(sum != 0)
+	{
+		// while(!rmtx.try_lock());
+		normalisation[x][y][colorLayer] *= (float)1/sum;	//on actualise l'offset de normalisation sur le pixel traité
+		// rmtx.unlock();
 	}
 
 	return result;

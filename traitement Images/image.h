@@ -2,6 +2,9 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <thread>
+#include <mutex>
+#include <chrono>
 
 #include <seal/seal.h>
 #include "filter.h"
@@ -131,6 +134,8 @@ class ImageCiphertext
 
 		bool applyFilter(Filter filter);
 
+		bool applyFilterThreaded(Filter filter, int numThread);
+
 		bool save(string fileName);
 
 		bool load(string fileName);
@@ -188,11 +193,13 @@ class ImageCiphertext
 		void printParameters();
 
 	private :
-		Ciphertext addRows(Ciphertext cipher, int position, int min, int max);
+		Ciphertext addRows(Ciphertext cipher, int position, int min, int max, const MemoryPoolHandle &pool);
 
 		Ciphertext convolute(int x, int y, int colorLayer, Filter filter);
 
 		Ciphertext convolute2(int x, int y, int colorLayer, Filter filter);
+
+		Ciphertext convolute2Threaded(SEALContext context, int height, int width, int x, int y, int colorLayer, Filter filter, mutex &rmtx, const MemoryPoolHandle &pool);
 
 		void initNorm();
 

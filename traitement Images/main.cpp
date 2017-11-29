@@ -64,9 +64,9 @@ int main(int argc, char* argv[])
 
     // imageLoaded.negate();
 	// imageLoaded.grey();
-	imageLoaded.applyFilter(filtreContours);
+	imageLoaded.applyFilterThreaded(filtreFlou, 4);
 
-	imageLoaded.save("~CiphertextFiltered");
+	// imageLoaded.save("~CiphertextFiltered");
 
 	ImagePlaintext imageFinale = imageLoaded.decrypt();
 
