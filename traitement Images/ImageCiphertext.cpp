@@ -217,11 +217,15 @@ bool ImageCiphertext::applyFilterThreaded(Filter filter, int numThread)
 		PolyCRTBuilder crtbuilder(imageContext);
 		Evaluator evaluator(imageContext);
 		vector<Ciphertext> newEncryptedData(imageHeight*3, Ciphertext());
+		string progressBar = string(20*numThread, ' ');
 
 
-		auto calculatePart = [&crtbuilder, &evaluator, &newEncryptedData, this](int threadIndex, Filter filter, mutex &rmtx, mutex &wmtx, int xBegin, int xEnd, const MemoryPoolHandle &pool)
+		auto calculatePart = [&crtbuilder, &evaluator, &newEncryptedData, &progressBar, this](int threadIndex, Filter filter, mutex &rmtx, mutex &wmtx, int xBegin, int xEnd, const MemoryPoolHandle &pool)
 		{
 			vector<Ciphertext> pixelResults;
+
+			int instantProgress = 0;
+			int progressPercentage = -1;
 
 			while(!wmtx.try_lock());
 			cout << "thread n°" << threadIndex << " beginning calculations from line " << xBegin << " to line " << xEnd << endl;
@@ -236,6 +240,24 @@ bool ImageCiphertext::applyFilterThreaded(Filter filter, int numThread)
 					for(int y = 0; y < imageWidth; y++)	//travaille sur chaque pixel de la ligne courante
 					{
 						pixelResults.push_back(convolute2Threaded(imageContext, imageHeight, imageWidth, x, y, colorLayer, filter, ref(rmtx), pool));
+
+						instantProgress++;
+						int currentProgressPercentage = (int)(((float)instantProgress/(imageWidth*(xEnd-xBegin+1)*3))*100);
+						if(currentProgressPercentage != progressPercentage)
+						{
+							progressPercentage = currentProgressPercentage;
+
+							string insert = "thread n°";
+							insert.append(to_string(threadIndex));
+							insert.append(" [ ");
+							insert.append(to_string(progressPercentage));
+							insert.append("% ] ");
+							while(!wmtx.try_lock());
+							progressBar.replace((threadIndex-1)*21, insert.length(), insert);
+							cout << "\r" << progressBar;
+							cout.flush();
+							wmtx.unlock();
+						}
 					}
 
 					while(!wmtx.try_lock());
@@ -272,7 +294,9 @@ bool ImageCiphertext::applyFilterThreaded(Filter filter, int numThread)
 
 		auto timeStop = chrono::high_resolution_clock::now();
 
-		cout << "filtering finished: " << chrono::duration_cast<chrono::seconds>(timeStop - timeStart).count() << " seconds" << endl << endl;
+		cout << "\nfiltering finished: " << chrono::duration_cast<chrono::seconds>(timeStop - timeStart).count() << " seconds" << endl << endl;
+
+		getNoiseBudget();
 	}
 }
 
@@ -351,7 +375,9 @@ Ciphertext ImageCiphertext::addRows(Ciphertext cipher, int position, int min, in
     vector<uint64_t> selector(crtbuilder.slot_count(), 0);
     Ciphertext tampon(pool);
     Plaintext selectorPlain(pool);
-    
+
+    int polyLength = imageContext.poly_modulus().significant_coeff_count() - 1;
+
     for(int coeff = min; coeff <= max; coeff++)
     {
         if(coeff == position) continue;
@@ -363,6 +389,14 @@ Ciphertext ImageCiphertext::addRows(Ciphertext cipher, int position, int min, in
 
         //shift du coefficient sur le slot position
         evaluator.rotate_rows(tampon, (coeff-position), gKey, pool);    //on donne le cipher, le nombre de shifts à faire (positif = gauche (?)) et la clé de shift
+
+        if(((position < polyLength/2) && (coeff >= polyLength/2)) || ((position >= polyLength/2) && (coeff < polyLength/2))) 
+        {
+        	cout << "position : " << position << " coeff : " << coeff << endl;
+        	evaluator.rotate_columns(tampon, gKey, pool);
+        }
+
+
 
         //on additionne les deux cipher, avec les coeffs 1 et 2 du cipher maintenant à la même position dans cipher et tampon
         evaluator.add(cipher, tampon);

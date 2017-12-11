@@ -12,13 +12,17 @@ using namespace seal;
 
 int main(int argc, char* argv[])
 {
-	 if(argc < 2) abort();
-
-    int dynamiqueValeursPlain = 256;    //peut être modifié si on travaille avec des valeurs comportant une autre dynamique (si on veux inverser des int par exemple)
+	if(argc < 2) abort();
 
 
 	string polyModulus = "1x^1024 + 1"; 
-	auto coeffModulus = coeff_modulus_128(4096);
+	auto coeffModulus = coeff_modulus_128(8192);
+
+	/*
+		pour N=1024 : 12289, 18433, 40961, 59393, 61441, 65537, 79873, 83969
+		pour N=2048 : 12289, 40961, 61441, 65537, 86017
+		pour N=4096 : 40961, 65537, 114689
+		*/
 	int plainModulus = 40961;       //valeur marche pour toutes les puissances de 2 jusqu'à 8192 (poly_modulus)
                                     //attention, réduit significativement le bruit disponible (peut être compensé par un coeff modulus plus grand, mais réduit la sécurité (?))
 
@@ -32,6 +36,7 @@ int main(int argc, char* argv[])
 
 	auto qualifiers = context.qualifiers();
     cout << "Batching enabled: " << boolalpha << qualifiers.enable_batching << endl;
+    cout << "poly modulus : " << context.poly_modulus().significant_coeff_count() << endl;
 
 	ImagePlaintext monImage(context, argv[1]);
 	monImage.printParameters();
@@ -39,10 +44,6 @@ int main(int argc, char* argv[])
 	ImageCiphertext imageCryptee(monImage);
 
 	imageCryptee.encrypt(monImage);
-	ImageCiphertext imageLoaded(imageCryptee);	//créée en tant que copie de l'imageCryptée
-
-	imageCryptee.save("~Ciphertext");
-	imageLoaded.load("~Ciphertext");
 
 	int schemaFiltre1[9] = 
     {
@@ -63,12 +64,13 @@ int main(int argc, char* argv[])
     Filter filtreFlou(3, 3, filtreVec2);
 
     // imageLoaded.negate();
-	// imageLoaded.grey();
-	imageLoaded.applyFilterThreaded(filtreFlou, 4);
+	// imageCryptee.grey();
+	imageCryptee.applyFilterThreaded(filtreFlou, 4);
+	// imageCryptee.applyFilter(filtreFlou);
 
 	// imageLoaded.save("~CiphertextFiltered");
 
-	ImagePlaintext imageFinale = imageLoaded.decrypt();
+	ImagePlaintext imageFinale = imageCryptee.decrypt();
 
 	imageFinale.toImage("imageResult.png");
 
