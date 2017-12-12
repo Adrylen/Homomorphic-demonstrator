@@ -14,6 +14,24 @@ int main(int argc, char* argv[])
 {
 	if(argc < 2) abort();
 
+	int schemaFiltre1[9] = 
+    {
+        0, 1, 0,
+        1, -4, 1,
+        0, 1, 0
+    };
+    vector<int> filtreVec1(schemaFiltre1, schemaFiltre1 + sizeof(schemaFiltre1)/sizeof(int));
+    Filter filtreContours(3, 3, filtreVec1);
+
+    int schemaFiltre2[9] = 
+    {
+        1, 1, 1,
+        1, 1, 1,
+        1, 1, 1
+    };
+    vector<int> filtreVec2(schemaFiltre2, schemaFiltre2 + sizeof(schemaFiltre2)/sizeof(int));
+    Filter filtreFlou(3, 3, filtreVec2);
+
 
 	string polyModulus = "1x^1024 + 1"; 
 	auto coeffModulus = coeff_modulus_128(8192);
@@ -38,41 +56,21 @@ int main(int argc, char* argv[])
     cout << "Batching enabled: " << boolalpha << qualifiers.enable_batching << endl;
     cout << "poly modulus : " << context.poly_modulus().significant_coeff_count() << endl;
 
-	ImagePlaintext monImage(context, argv[1]);
+	ImagePlaintext monImage(parameters, argv[1]);
+	cout << "parametres de monImage : ";
 	monImage.printParameters();
 
-	ImageCiphertext imageCryptee(monImage);
+	ImageCiphertext imageCryptee;
+	monImage.encrypt(imageCryptee);
 
-	imageCryptee.encrypt(monImage);
-
-	int schemaFiltre1[9] = 
-    {
-        0, 1, 0,
-        1, -4, 1,
-        0, 1, 0
-    };
-    vector<int> filtreVec1(schemaFiltre1, schemaFiltre1 + sizeof(schemaFiltre1)/sizeof(int));
-    Filter filtreContours(3, 3, filtreVec1);
-
-    int schemaFiltre2[9] = 
-    {
-        1, 1, 1,
-        1, 1, 1,
-        1, 1, 1
-    };
-    vector<int> filtreVec2(schemaFiltre2, schemaFiltre2 + sizeof(schemaFiltre2)/sizeof(int));
-    Filter filtreFlou(3, 3, filtreVec2);
-
-    // imageLoaded.negate();
-	// imageCryptee.grey();
-	imageCryptee.applyFilterThreaded(filtreFlou, 4);
-	// imageCryptee.applyFilter(filtreFlou);
+    // imageCryptee.negate();
+	imageCryptee.grey();
+	// imageCryptee.applyFilter(filtreFlou, 4);
 
 	// imageLoaded.save("~CiphertextFiltered");
 
-	ImagePlaintext imageFinale = imageCryptee.decrypt();
-
-	imageFinale.toImage("imageResult.png");
+	monImage.decrypt(imageCryptee);
+	monImage.toImage("imageResult.png");
 
 	return 0;
 }

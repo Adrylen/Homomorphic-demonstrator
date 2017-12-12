@@ -1,30 +1,99 @@
 #include "image.h"
 #include "png-util.h"
 
-ImagePlaintext::ImagePlaintext(const SEALContext &context, char* fileName) : imageContext(context)
+ImagePlaintext::ImagePlaintext(const EncryptionParameters &parameters, char* fileName)
 {
 
 	//methode à ajouter pour vérifier le fileName et l'image correspondante (si existante) et set les attributs imageWidth et imageHeight
 	//pour le moment le set se fait dans PNGToImagePlaintext
 
+	imageParameters = parameters;
+
 	toPlaintext(fileName);
+
+	generateKeys();
+
+	initNorm();
 }
 
-ImagePlaintext::ImagePlaintext(const SEALContext &context, uint32_t height, uint32_t width, float ***normalisation, vector<Plaintext> data) : imageContext(context)
+ImagePlaintext::ImagePlaintext(const EncryptionParameters &parameters, SecretKey sKey)
 {
-	imageHeight = height;
-	imageWidth = width;
+	imageParameters = parameters;
+	this->sKey = sKey;
 	initNorm();
-	copyNorm(normalisation);
+}
 
-	for(int i = 0; i < data.size(); i++)
+bool ImagePlaintext::generateKeys()
+{
+	cout << "generating keys" << endl;
+
+	SEALContext context(imageParameters);
+
+	KeyGenerator generator(context);
+    sKey = generator.secret_key();
+    pKey = generator.public_key();
+    generator.generate_galois_keys(30, gKey);	//attention, le DBC (premier paramètre) devra être adapté en fonction des opérations
+
+    cout << "keys generated successfully" << endl << endl;
+}
+
+bool ImagePlaintext::encrypt(ImageCiphertext &destination)
+{
+	cout << "début encryption" << endl;
+	SEALContext imageContext(imageParameters);
+
+	Encryptor encryptor(imageContext, pKey);
+	Ciphertext cipherTampon = Ciphertext();
+
+	vector<Ciphertext> encryptedImageData;
+
+	cout << "début du cryptage image" << endl;
+
+	auto timeStart = chrono::high_resolution_clock::now();
+
+	for(uint64_t i = 0; i < imageData.size(); i++)
 	{
-		imageData.push_back(data.at(i));
+		encryptor.encrypt(imageData.at(i), cipherTampon);
+		encryptedImageData.push_back(cipherTampon);
 	}
+
+	auto timeStop = chrono::high_resolution_clock::now();
+
+	cout << "--> fin du cryptage: " << chrono::duration_cast<chrono::milliseconds>(timeStop - timeStart).count() << " milliseconds" << endl << endl;
+
+	destination = ImageCiphertext(imageParameters, imageHeight, imageWidth, pKey, gKey, encryptedImageData); 
+}
+
+bool ImagePlaintext::decrypt(ImageCiphertext &source)
+{
+	this->imageHeight = source.getHeight();
+	this->imageWidth = source.getWidth();
+	this->normalisation = source.getNorm();
+
+	SEALContext imageContext(imageParameters);
+	Decryptor decryptor(imageContext, sKey);
+	vector<Ciphertext> encryptedData = source.getAllData();
+	Plaintext plainTampon = Plaintext();
+	this->imageData.clear();
+
+	cout << "début du décryptage image" << endl;
+
+	auto timeStart = chrono::high_resolution_clock::now();
+
+	for(uint64_t i = 0; i < encryptedData.size(); i++)
+	{
+		decryptor.decrypt(encryptedData.at(i), plainTampon);
+		this->imageData.push_back(plainTampon);
+	}
+
+	auto timeStop = chrono::high_resolution_clock::now();
+
+	cout << "--> fin décryptage: " << chrono::duration_cast<chrono::milliseconds>(timeStop - timeStart).count() << " milliseconds" << endl << endl;
 }
 
 bool ImagePlaintext::toPlaintext(char* fileName)
 {
+	SEALContext imageContext(imageParameters);
 	PolyCRTBuilder crtbuilder(imageContext);
 	read_png_file(fileName);
 
@@ -71,6 +140,7 @@ bool ImagePlaintext::toPlaintext(char* fileName)
 
 bool ImagePlaintext::toImage(string fileName)
 {
+	SEALContext imageContext(imageParameters);
 	PolyCRTBuilder crtbuilder(imageContext);
 
 	cout << "début décodage" << endl;
@@ -127,6 +197,7 @@ string ImagePlaintext::to_string()
 
 void ImagePlaintext::printParameters()
 {
+	SEALContext imageContext(imageParameters);
     cout << endl << "/ Encryption parameters:" << endl;
     cout << "| poly_modulus: " << imageContext.poly_modulus().to_string() << endl;
 
@@ -170,12 +241,17 @@ void ImagePlaintext::initNorm()
 
 void ImagePlaintext::copyNorm(float ***norm)
 {
+	cout << norm;
+	cout << "1";
 	for(int i = 0; i < imageHeight; i++)
 	{
+		cout << "2";
 		for(int j = 0; j < imageWidth; j++)
 		{
+			cout << "3";
 			for(int k = 0; k < 3; k++)
 			{
+				cout << norm[i][j][k];
 				normalisation[i][j][k] = norm[i][j][k];
 			}
 		}

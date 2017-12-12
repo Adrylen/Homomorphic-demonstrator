@@ -12,22 +12,123 @@
 using namespace std;
 using namespace seal;
 
+class ImageCiphertext;
+class ImagePlaintext;
 
+class ImageCiphertext
+{
+
+	public :
+
+		ImageCiphertext(){};
+
+		ImageCiphertext(ImageCiphertext& autre);
+
+		ImageCiphertext(EncryptionParameters parameters, int height, int width, PublicKey pKey, GaloisKeys gKey, vector<Ciphertext> encryptedData);
+
+		ImageCiphertext& operator=(const ImageCiphertext& assign);
+
+		bool negate();
+
+		bool grey();
+
+		bool applyFilter(Filter filter, int numThread = 1);
+
+		bool save(string fileName);
+
+		bool load(string fileName);
+
+		uint32_t getDataSize()
+		{
+			return encryptedImageData.size();
+		}
+
+		Ciphertext getDataAt(uint32_t index)
+		{
+			if(index >= encryptedImageData.size())
+				throw std::out_of_range("index must be less than data size");
+			return encryptedImageData.at(index);
+		}
+
+		vector<Ciphertext> getAllData()
+		{
+			return encryptedImageData;
+		}
+
+		uint32_t getHeight()
+		{
+			return imageHeight;
+		}
+
+		uint32_t getWidth()
+		{
+			return imageWidth;
+		}
+
+		EncryptionParameters getParameters()
+		{
+			return imageParameters;
+		}
+
+		PublicKey getPublicKey()
+		{
+			return pKey;
+		}
+
+		GaloisKeys getGaloisKeys()
+		{
+			return gKey;
+		}
+
+		float*** getNorm()
+		{
+			return normalisation;
+		}
+
+		void printParameters();
+
+	private :
+		Ciphertext addRows(SEALContext imageContext, Ciphertext cipher, int position, int min, int max, const MemoryPoolHandle &pool);
+
+		Ciphertext convolute(SEALContext context, int height, int width, int x, int y, int colorLayer, Filter filter, mutex &rmtx, const MemoryPoolHandle &pool);
+
+		void initNorm();
+
+		void updateNorm(float value);
+
+		bool verifyNormOver(float value);
+
+		void printLine(vector<uint64_t> vect);
+
+		EncryptionParameters imageParameters;
+		PublicKey pKey;
+		GaloisKeys gKey;
+		uint32_t imageHeight, imageWidth;
+		vector<Ciphertext> encryptedImageData;
+		float ***normalisation;
+};
 
 class ImagePlaintext
 {
 
 	public :
+
+		ImagePlaintext(){};
+
 	/**
 		crée un nouvel objet correspondant aux données d'une image sous forme de plaintext (CRT) appartenant à SEAL
 		@param[in] parameters paramètres décidés en amont, et validés
 		@param[in] fileName le nom du fichier à ouvrir (png)
 	*/
-		ImagePlaintext(const SEALContext &context, char* fileName);
-	/**
-		contructeur utilisé pour copier les données décryptées d'un objet ImageCiphertext dans un objet de type ImagePlaintext
-	*/
-		ImagePlaintext(const SEALContext &context, uint32_t height, uint32_t width, float ***normalisation, vector<Plaintext> data);
+		ImagePlaintext(const EncryptionParameters &parameters, char* fileName);
+
+		ImagePlaintext(const EncryptionParameters &parameters, SecretKey sKey);
+
+		bool generateKeys();
+
+		bool encrypt(ImageCiphertext &destination);
+
+		bool decrypt(ImageCiphertext &source);
 
 	/**
 		lit une image png pour contruire un objet ImagePlaintext contenant les données de l'image.
@@ -85,10 +186,10 @@ class ImagePlaintext
 	/**
 		renvoie les paramètres associés à ImagePlaintext
 	*/
-		SEALContext getContext()
+		EncryptionParameters getParameters()
 		{
-			SEALContext retContext((const SEALContext) imageContext);
-			return retContext;
+			EncryptionParameters retParameters((const EncryptionParameters) imageParameters);
+			return retParameters;
 		}
 
 
@@ -104,120 +205,11 @@ class ImagePlaintext
 
 		void copyNorm(float ***norm);
 
-		SEALContext imageContext;
-		uint32_t imageHeight, imageWidth;
-		vector<Plaintext> imageData;
-		float ***normalisation;
-};
-
-
-
-
-
-class ImageCiphertext
-{
-
-	public :
-		ImageCiphertext(ImagePlaintext autre);
-
-		ImageCiphertext(ImageCiphertext& autre);
-
-		bool generateKeys();
-
-		bool encrypt(ImagePlaintext autre);
-
-		ImagePlaintext decrypt();
-
-		bool negate();
-
-		bool grey();
-
-		bool applyFilter(Filter filter);
-
-		bool applyFilterThreaded(Filter filter, int numThread);
-
-		bool save(string fileName);
-
-		bool load(string fileName);
-
-		uint32_t getDataSize()
-		{
-			uint32_t dataSize = encryptedImageData.size();
-			return dataSize;
-		}
-
-		Ciphertext getDataAt(uint32_t index)
-		{
-			Ciphertext retCipher((const Ciphertext) encryptedImageData.at(index));
-			return retCipher;
-		}
-
-		uint32_t getHeight()
-		{
-			uint32_t retHeight(imageHeight);
-			return retHeight;
-		}
-
-		uint32_t getWidth()
-		{
-			uint32_t retWidth(imageWidth);
-			return retWidth;
-		}
-
-		SEALContext getContext()
-		{
-			SEALContext retContext((const SEALContext) imageContext);
-			return retContext;
-		}
-
-		PublicKey getPublicKey()
-		{
-			PublicKey pKeyRet(pKey);
-			return pKeyRet;
-		}
-
-		SecretKey getSecretKey()
-		{
-			SecretKey sKeyRet(sKey);
-			return sKeyRet;
-		}
-
-		GaloisKeys getGaloisKeys()
-		{
-			GaloisKeys gKeyRet(gKey);
-			return gKeyRet;
-		}
-
-		int getNoiseBudget();
-
-		void printParameters();
-
-	private :
-		Ciphertext addRows(Ciphertext cipher, int position, int min, int max, const MemoryPoolHandle &pool);
-
-		Ciphertext convolute(int x, int y, int colorLayer, Filter filter);
-
-		Ciphertext convolute2(int x, int y, int colorLayer, Filter filter);
-
-		Ciphertext convolute2Threaded(SEALContext context, int height, int width, int x, int y, int colorLayer, Filter filter, mutex &rmtx, const MemoryPoolHandle &pool);
-
-		void initNorm();
-
-		void updateNorm(float value);
-
-		bool verifyNormOver(float value);
-
-		void printLine(vector<uint64_t> vect);
-
-		SEALContext imageContext;
+		EncryptionParameters imageParameters;
 		SecretKey sKey;
 		PublicKey pKey;
 		GaloisKeys gKey;
 		uint32_t imageHeight, imageWidth;
-		vector<Ciphertext> encryptedImageData;
+		vector<Plaintext> imageData;
 		float ***normalisation;
 };
-
-
-
-
