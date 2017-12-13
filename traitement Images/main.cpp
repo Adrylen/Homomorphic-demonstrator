@@ -64,8 +64,8 @@ int main(int argc, char* argv[])
 	monImage.encrypt(imageCryptee);
 
     // imageCryptee.negate();
-	imageCryptee.grey();
-	// imageCryptee.applyFilter(filtreFlou, 4);
+	// imageCryptee.grey();
+	imageCryptee.applyFilter(filtreFlou, 8);
 
 	// imageLoaded.save("~CiphertextFiltered");
 

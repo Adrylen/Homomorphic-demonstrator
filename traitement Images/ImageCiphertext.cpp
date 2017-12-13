@@ -120,7 +120,7 @@ bool ImageCiphertext::grey()
 }
 
 
-bool ImageCiphertext::applyFilter(Filter filter, int numThread)
+bool ImageCiphertext::applyFilter(Filter filter, int numThreads)
 {
 	if(filter.validate())
 	{
@@ -128,7 +128,7 @@ bool ImageCiphertext::applyFilter(Filter filter, int numThread)
 		PolyCRTBuilder crtbuilder(imageContext);
 		Evaluator evaluator(imageContext);
 		vector<Ciphertext> newEncryptedData(imageHeight*3, Ciphertext());
-		string progressBar = string(21*numThread, ' ');
+		string progressBar = string(21*numThreads, ' ');
 
 
 		auto calculatePart = [&crtbuilder, &evaluator, &newEncryptedData, &progressBar, this](int threadIndex, Filter filter, mutex &rmtx, mutex &wmtx, int xBegin, int xEnd, const MemoryPoolHandle &pool)
@@ -183,20 +183,39 @@ bool ImageCiphertext::applyFilter(Filter filter, int numThread)
 		mutex readMutex, writeMutex;
 		vector<thread> threads;
 
-		int i;
-		int xByThread = (int)imageHeight/numThread;
-
 		cout << "applying filter :" << endl;
 		filter.print();
 
+		unsigned int numThreadsAdvised = thread::hardware_concurrency();
+		cout << "possible number of threads : " << numThreadsAdvised << endl;
+		if(numThreads > numThreadsAdvised && numThreadsAdvised != 0)
+		{
+			cout << "number of threads asked for is too high, getting down to " << numThreadsAdvised << " threads" << endl;
+			numThreads = numThreadsAdvised;
+		}
+
+		if(numThreads > imageHeight)
+		{
+			cout << "too much threads for the height of the image, getting down to " << imageHeight << " threads" << endl;
+			numThreads = imageHeight;
+		}
+
+		vector<int> linesPerThread(numThreads, 0);
+
+		for(int i = 0; i < imageHeight; i++)
+		{
+			linesPerThread[i%numThreads]++;
+		}
+
 		auto timeStart = chrono::high_resolution_clock::now();
 
-		for(i = 0; i < numThread-1; i++)
+		int sum = 0;
+		for(int i = 0; i < numThreads; i++)
 		{
-			threads.emplace_back(calculatePart, i+1, filter, ref(readMutex), ref(writeMutex), i*xByThread, (i+1)*xByThread-1, MemoryPoolHandle::New(false));
+			threads.emplace_back(calculatePart, i+1, filter, ref(readMutex), ref(writeMutex), sum, (sum)+linesPerThread[i]-1, MemoryPoolHandle::New(false));
+			sum += linesPerThread[i];
 		}
-		threads.emplace_back(calculatePart, i+1, filter, ref(readMutex), ref(writeMutex), i*xByThread, imageHeight-1, MemoryPoolHandle::New(false));
-
+		
 		for(int j = 0; j < threads.size(); j++)
 		{
 			threads[j].join();
@@ -294,7 +313,6 @@ Ciphertext ImageCiphertext::addRows(SEALContext context, Ciphertext cipher, int 
 
         if(((position < polyLength/2) && (coeff >= polyLength/2)) || ((position >= polyLength/2) && (coeff < polyLength/2))) 
         {
-        	cout << "position : " << position << " coeff : " << coeff << endl;
         	evaluator.rotate_columns(tampon, gKey, pool);
         }
 
