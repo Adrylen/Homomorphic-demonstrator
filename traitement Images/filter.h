@@ -10,12 +10,12 @@ class Filter
 {
 	public :
 
-		Filter(int height, int width, vector<int> values);
+		Filter(string name, int height, int width, vector<int> values);
 		
 		void print();
 		
 		int getValue(int x, int y);
-		float getNorm();
+		int getNorm();
 
 		int getHeight()	{ return filterHeight;	}
 		int getWidth()	{ return filterWidth;	}
@@ -23,6 +23,7 @@ class Filter
 		
 
 	private :
+		string filterName;
 		int filterHeight;
 		int filterWidth;
 		vector<int> filterValues;

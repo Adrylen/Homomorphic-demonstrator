@@ -1,7 +1,8 @@
 #include "filter.h"
 
-Filter::Filter(int height, int width, vector<int> values)
+Filter::Filter(string name, int height, int width, vector<int> values)
 {
+	filterName = name;
 	filterHeight = height;
 	filterWidth = width;
 	filterValues = values;
@@ -10,6 +11,7 @@ Filter::Filter(int height, int width, vector<int> values)
 
 void Filter::print()
 {
+	cout << "filter '" << filterName << "'" << endl;
 	for(int i=0; i<filterHeight; i++)
 	{
 		for(int j=0; j<filterWidth; j++)
@@ -31,7 +33,7 @@ int Filter::getValue(int x, int y)
 }
 
 
-float Filter::getNorm()
+int Filter::getNorm()
 {
 	int sum = 0;
 
@@ -40,5 +42,5 @@ float Filter::getNorm()
 		sum += filterValues[i];
 	}
 
-	return (float) 1/sum;
+	return sum;
 }

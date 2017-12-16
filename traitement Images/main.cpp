@@ -21,7 +21,7 @@ int main(int argc, char* argv[])
         0, 1, 0
     };
     vector<int> filtreVec1(schemaFiltre1, schemaFiltre1 + sizeof(schemaFiltre1)/sizeof(int));
-    Filter filtreContours(3, 3, filtreVec1);
+    Filter edgeDetection("edge detection", 3, 3, filtreVec1);
 
     int schemaFiltre2[9] = 
     {
@@ -30,11 +30,29 @@ int main(int argc, char* argv[])
         1, 1, 1
     };
     vector<int> filtreVec2(schemaFiltre2, schemaFiltre2 + sizeof(schemaFiltre2)/sizeof(int));
-    Filter filtreFlou(3, 3, filtreVec2);
+    Filter meanBlur("mean blur", 3, 3, filtreVec2);
+
+	int schemaFiltre3[9] = 
+    {
+        0, -1, 0,
+        -1, 5, -1,
+        0, -1, 0
+    };
+    vector<int> filtreVec3(schemaFiltre3, schemaFiltre3 + sizeof(schemaFiltre3)/sizeof(int));
+    Filter sharpen("sharpen", 3, 3, filtreVec3);
+
+    int schemaFiltre4[9] = 
+    {
+        -2, -1, 0,
+        -1, 1, 1,
+        0, 1, 2
+    };
+    vector<int> filtreVec4(schemaFiltre4, schemaFiltre4 + sizeof(schemaFiltre4)/sizeof(int));
+    Filter emboss("emboss", 3, 3, filtreVec4);
 
 
 	string polyModulus = "1x^1024 + 1"; 
-	auto coeffModulus = coeff_modulus_128(8192);
+	auto coeffModulus = coeff_modulus_128(4096);
 
 	/*
 		pour N=1024 : 12289, 18433, 40961, 59393, 61441, 65537, 79873, 83969
@@ -65,7 +83,7 @@ int main(int argc, char* argv[])
 
     // imageCryptee.negate();
 	// imageCryptee.grey();
-	imageCryptee.applyFilter(filtreFlou, 8);
+	imageCryptee.applyFilter(emboss, 7);
 
 	// imageLoaded.save("~CiphertextFiltered");
 

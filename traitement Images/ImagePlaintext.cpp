@@ -3,51 +3,30 @@
 
 ImagePlaintext::ImagePlaintext(const EncryptionParameters &parameters, char* fileName)
 {
-
-	//methode à ajouter pour vérifier le fileName et l'image correspondante (si existante) et set les attributs imageWidth et imageHeight
-	//pour le moment le set se fait dans PNGToImagePlaintext
-
-	imageParameters = parameters;
+	this->imageParameters = parameters;
 
 	toPlaintext(fileName);
 
 	generateKeys();
-
-	initNorm();
 }
 
 ImagePlaintext::ImagePlaintext(const EncryptionParameters &parameters, SecretKey sKey)
 {
 	imageParameters = parameters;
 	this->sKey = sKey;
-	initNorm();
 }
 
-bool ImagePlaintext::generateKeys()
+void ImagePlaintext::encrypt(ImageCiphertext &destination)
 {
-	cout << "generating keys" << endl;
-
-	SEALContext context(imageParameters);
-
-	KeyGenerator generator(context);
-    sKey = generator.secret_key();
-    pKey = generator.public_key();
-    generator.generate_galois_keys(30, gKey);	//attention, le DBC (premier paramètre) devra être adapté en fonction des opérations
-
-    cout << "keys generated successfully" << endl << endl;
-}
-
-bool ImagePlaintext::encrypt(ImageCiphertext &destination)
-{
-	cout << "début encryption" << endl;
 	SEALContext imageContext(imageParameters);
 
 	Encryptor encryptor(imageContext, pKey);
+	Decryptor decryptor(imageContext, sKey);
 	Ciphertext cipherTampon = Ciphertext();
 
 	vector<Ciphertext> encryptedImageData;
 
-	cout << "début du cryptage image" << endl;
+	cout << "beginning image encryption" << endl;
 
 	auto timeStart = chrono::high_resolution_clock::now();
 
@@ -59,12 +38,13 @@ bool ImagePlaintext::encrypt(ImageCiphertext &destination)
 
 	auto timeStop = chrono::high_resolution_clock::now();
 
-	cout << "--> fin du cryptage: " << chrono::duration_cast<chrono::milliseconds>(timeStop - timeStart).count() << " milliseconds" << endl << endl;
+	cout << "--> encryption finished: " << chrono::duration_cast<chrono::milliseconds>(timeStop - timeStart).count() << " milliseconds" << endl;
+	cout << "available noise budget: " << decryptor.invariant_noise_budget(encryptedImageData.at(1)) << " bits" << endl << endl;
 
 	destination = ImageCiphertext(imageParameters, imageHeight, imageWidth, pKey, gKey, encryptedImageData); 
 }
 
-bool ImagePlaintext::decrypt(ImageCiphertext &source)
+void ImagePlaintext::decrypt(ImageCiphertext &source)
 {
 	this->imageHeight = source.getHeight();
 	this->imageWidth = source.getWidth();
@@ -76,7 +56,8 @@ bool ImagePlaintext::decrypt(ImageCiphertext &source)
 	Plaintext plainTampon = Plaintext();
 	this->imageData.clear();
 
-	cout << "début du décryptage image" << endl;
+	cout << "remaining noise budget: " << decryptor.invariant_noise_budget(encryptedData.at(1)) << " bits" << endl;
+	cout << "beginning decryption" << endl;
 
 	auto timeStart = chrono::high_resolution_clock::now();
 
@@ -88,22 +69,28 @@ bool ImagePlaintext::decrypt(ImageCiphertext &source)
 
 	auto timeStop = chrono::high_resolution_clock::now();
 
-	cout << "--> fin décryptage: " << chrono::duration_cast<chrono::milliseconds>(timeStop - timeStart).count() << " milliseconds" << endl << endl;
+	cout << "--> end of decryption: " << chrono::duration_cast<chrono::milliseconds>(timeStop - timeStart).count() << " milliseconds" << endl << endl;
 }
 
-bool ImagePlaintext::toPlaintext(char* fileName)
+void ImagePlaintext::toPlaintext(char* fileName)
 {
 	SEALContext imageContext(imageParameters);
 	PolyCRTBuilder crtbuilder(imageContext);
 	read_png_file(fileName);
 
 	if(width > imageContext.poly_modulus().significant_coeff_count() - 1)
-		throw invalid_argument("poly_modulus doit être supérieur à la largeur de l'image");
+		throw invalid_argument("poly_modulus must be over image width");
 
-	cout << "début d'encodage" << endl;
+	cout << "beginning encoding" << endl;
 
 	imageWidth = width;
 	imageHeight = height;
+
+	//calculating offset to apply to values to put them at the center of the plain modulus
+	uint64_t plainModulus = *imageContext.plain_modulus().pointer();
+	int offset = (int)(plainModulus - 255) / 2;
+
+	cout << "offset applied : " << offset << endl;
 
 	vector<uint64_t> reds(crtbuilder.slot_count(), 0);
 	vector<uint64_t> greens(crtbuilder.slot_count(), 0);
@@ -115,16 +102,21 @@ bool ImagePlaintext::toPlaintext(char* fileName)
 
 	for(int i = 0; i < height; i++)
 	{
-		 png_bytep row = row_pointers[i];
+		png_bytep row = row_pointers[i];
 		for(int j = 0; j < width; j++)
 		{
 			png_bytep px = &(row[j * 4]);
 
-			reds[j] = px[0];
-			greens[j] = px[1];
-			blues[j] = px[2];
+			//taking pixel color value, and adding offset
+			reds[j] = px[0] + offset;
+			greens[j] = px[1] + offset;
+			blues[j] = px[2] + offset;
 		}
 
+		//every value of a line of the image is stored in a ciphertext using CRT batching (see SEAL documentation)
+		//the data is always sotred as such : a ciphertext for red values of line, then for green values, and then for blue values
+		//then next line of the image
+		//as such, there is imageHeight*3 ciphertexts in data
 		crtbuilder.compose(reds, redsPoly);
 		crtbuilder.compose(greens, greensPoly);
 		crtbuilder.compose(blues, bluesPoly);
@@ -133,20 +125,22 @@ bool ImagePlaintext::toPlaintext(char* fileName)
 		imageData.push_back(bluesPoly);
 	}
 
-	cout << "fin d'encodage" << endl;
-
-	return 0;
+	cout << "end of encoding" << endl;
 }
 
-bool ImagePlaintext::toImage(string fileName)
+void ImagePlaintext::toImage(string fileName)
 {
 	SEALContext imageContext(imageParameters);
 	PolyCRTBuilder crtbuilder(imageContext);
 
-	cout << "début décodage" << endl;
+	cout << "beginning decoding" << endl;
 
 	int height = imageHeight;
 	int width = imageWidth;
+
+	//calculating offset to be removed
+	uint64_t plainModulus = *imageContext.plain_modulus().pointer();
+	int offset = (int)(plainModulus - 255) / 2;
 
 	vector<uint64_t> reds(crtbuilder.slot_count(), 0);
 	vector<uint64_t> greens(crtbuilder.slot_count(), 0);
@@ -164,36 +158,36 @@ bool ImagePlaintext::toImage(string fileName)
 		{
 			png_bytep px = &(row[j * 4]);
 
-			// cout << "red[" << i << "][" << j << "] = " << reds[j] << "x" << normalisation[i][j][0] << endl;
-			px[0] = (int)reds[j]*normalisation[i][j][0];
-			// cout << "green[" << i << "][" << j << "] = " << greens[j] << "x" << normalisation[i][j][1] << endl;
-			px[1] = (int)greens[j]*normalisation[i][j][1];
-			// cout << "blue[" << i << "][" << j << "] = " << blues[j] << "x" << normalisation[i][j][2] << endl;
-			px[2] = (int)blues[j]*normalisation[i][j][2];
+			//for each value, the offset is removed (thus, the value can be negative), then normalisation is applied
+			int pix0 = (int)((reds[j]-offset)*normalisation[i][j][0]);
+			//makes sure that the value is taken back to pixel dynamics
+			(pix0 < 0) ? (pix0 = 0) : (pix0 = pix0);
+			(pix0 > 255) ? (pix0 = 255) : (pix0 = pix0);
+			px[0] = pix0;
+			// cout << "(" << reds[j] << " - " << offset << ")*" << normalisation[i][j][0] << ", px[" << i << "][" << j << "][0] = " << (int)px[0] << endl;	//DEBUG
+
+			int pix1 = (int)((greens[j]-offset)*normalisation[i][j][1]);
+			(pix1 < 0) ? (pix1 = 0) : (pix1 = pix1);
+			(pix1 > 255) ? (pix1 = 255) : (pix1 = pix1);
+			px[1] = pix1;
+			// cout << "(" << greens[j] << " - " << offset << ")*" << normalisation[i][j][1] << ", px[" << i << "][" << j << "][1] = " << (int)px[1] << endl;	//DEBUG
+
+			int pix2 = (int)((blues[j]-offset)*normalisation[i][j][2]);
+			(pix2 < 0) ? (pix2 = 0) : (pix2 = pix2);
+			(pix2 > 255) ? (pix2 = 255) : (pix2 = pix2);
+			px[2] = pix2;
+			// cout << "(" << blues[j] << " - " << offset << ")*" << normalisation[i][j][2] << ", px[" << i << "][" << j << "][2] = " << (int)px[2] << endl;	//DEBUG
+
 		}
 	}
 
-	cout << "fin décodage" << endl;
+	cout << "end of decoding" << endl;
 
-	cout << "début écriture PNG" << endl;
+	cout << "writing to PNG file '" << fileName << "'" << endl;
 	write_png_file(&fileName[0u]);
-	cout << "fin d'écriture PNG" << endl;
-
-	return 0;
+	cout << "finished" << endl;
 }
 
-string ImagePlaintext::to_string()
-{
-	string retString;
-
-	for(int i = 0; i < imageData.size(); i++)
-	{
-		retString.append(imageData.at(i).to_string());
-		retString.append("\n");
-	}
-
-	return retString;
-}
 
 void ImagePlaintext::printParameters()
 {
@@ -209,6 +203,9 @@ void ImagePlaintext::printParameters()
 
     cout << "| plain_modulus: " << imageContext.plain_modulus().value() << endl;
     cout << "\\ noise_standard_deviation: " << imageContext.noise_standard_deviation() << endl;
+    cout << "/ image height: " << imageHeight << endl;
+    cout << "| image width: " << imageWidth << endl;
+    cout << "\\ offset applied to values: " << (int)(imageContext.plain_modulus().value() - 255) / 2 << endl;
     cout << endl;
 }
 
@@ -217,41 +214,35 @@ void ImagePlaintext::printParameters()
 //############################################ private classes ######################################################
 //###################################################################################################################
 
-void ImagePlaintext::initNorm()
+void ImagePlaintext::generateKeys()
 {
-	// normalisation = (float**) malloc(imageHeight*sizeof(*normalisation));
+	cout << "generating keys" << endl;
 
-	// for(int i = 0; i < imageHeight; i++)
-	// {
-	// 	normalisation[i] = (float*) malloc(imageWidth*sizeof(**normalisation));
-	// }
+	SEALContext context(imageParameters);
 
-	normalisation = (float***) malloc(imageHeight*sizeof(*normalisation));
+	KeyGenerator generator(context);
+    sKey = generator.secret_key();
+    pKey = generator.public_key();
 
-	for(int i = 0; i < imageHeight; i++)
-	{
-		normalisation[i] = (float**) malloc(imageWidth*sizeof(**normalisation));
+    //this key is used during ciphertext values rotation (used during matric filtering)
+    //current Galois key is generated with a Decomposition Bit Count of 30
+    //this value is purely subjective, and was simply taken as the mean of possible values
+    //taking a lower DBC will slow the rotation process, but will lower the noise generated by it
+    //inversely, taking a higher value will result in more noise but will process faster
+    generator.generate_galois_keys(30, gKey);
 
-		for(int j = 0; j < imageWidth; j++)
-		{
-			normalisation[i][j] = (float*) malloc(3*sizeof(***normalisation));
-		}
-	}
+    cout << "keys generated successfully" << endl << endl;
 }
+
 
 void ImagePlaintext::copyNorm(float ***norm)
 {
-	cout << norm;
-	cout << "1";
 	for(int i = 0; i < imageHeight; i++)
 	{
-		cout << "2";
 		for(int j = 0; j < imageWidth; j++)
 		{
-			cout << "3";
 			for(int k = 0; k < 3; k++)
 			{
-				cout << norm[i][j][k];
 				normalisation[i][j][k] = norm[i][j][k];
 			}
 		}
