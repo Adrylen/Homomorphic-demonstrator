@@ -52,14 +52,14 @@ int main(int argc, char* argv[])
 
 
 	string polyModulus = "1x^1024 + 1"; 
-	auto coeffModulus = coeff_modulus_128(4096);
+	auto coeffModulus = coeff_modulus_128(8192);
 
 	/*
 		pour N=1024 : 12289, 18433, 40961, 59393, 61441, 65537, 79873, 83969
 		pour N=2048 : 12289, 40961, 61441, 65537, 86017
 		pour N=4096 : 40961, 65537, 114689
 		*/
-	int plainModulus = 40961;       //valeur marche pour toutes les puissances de 2 jusqu'à 8192 (poly_modulus)
+	int plainModulus = 59393;       //valeur marche pour toutes les puissances de 2 jusqu'à 8192 (poly_modulus)
                                     //attention, réduit significativement le bruit disponible (peut être compensé par un coeff modulus plus grand, mais réduit la sécurité (?))
 
 	EncryptionParameters parameters;
@@ -74,21 +74,37 @@ int main(int argc, char* argv[])
     cout << "Batching enabled: " << boolalpha << qualifiers.enable_batching << endl;
     cout << "poly modulus : " << context.poly_modulus().significant_coeff_count() << endl;
 
-	ImagePlaintext monImage(parameters, argv[1]);
+
+	ImagePlaintext monImage1(parameters, argv[1]);
 	cout << "parametres de monImage : ";
-	monImage.printParameters();
+	monImage1.printParameters();
+	ImageCiphertext imageCryptee1;
+	monImage1.encrypt(imageCryptee1);
+    imageCryptee1.negate();
+    monImage1.decrypt(imageCryptee1);
+    monImage1.toImage("imageNegated.png");
 
-	ImageCiphertext imageCryptee;
-	monImage.encrypt(imageCryptee);
 
-    // imageCryptee.negate();
-	// imageCryptee.grey();
-	imageCryptee.applyFilter(emboss, 7);
+    ImagePlaintext monImage2(parameters, argv[1]);
+    cout << "parametres de monImage : ";
+    monImage2.printParameters();
+    ImageCiphertext imageCryptee2;
+    monImage2.encrypt(imageCryptee2);
+    imageCryptee2.grey();
+    monImage2.decrypt(imageCryptee2);
+    monImage2.toImage("imageGreyed.png");
 
-	// imageLoaded.save("~CiphertextFiltered");
 
-	monImage.decrypt(imageCryptee);
-	monImage.toImage("imageResult.png");
+    ImagePlaintext monImage3(parameters, argv[1]);
+    cout << "parametres de monImage : ";
+    monImage3.printParameters();
+    ImageCiphertext imageCryptee3;
+    monImage3.encrypt(imageCryptee3);
+    imageCryptee3.applyFilter(meanBlur, 7);
+    monImage3.decrypt(imageCryptee3);
+    monImage3.toImage("imageFiltered.png");
+
+ 
 
 	return 0;
 }

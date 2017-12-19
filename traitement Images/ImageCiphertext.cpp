@@ -74,6 +74,12 @@ void ImageCiphertext::grey()
 	uint64_t plainModulus = *imageContext.plain_modulus().pointer();
 	int offset = (int)(plainModulus - 255) / 2;
 
+	if(offset < 25500)
+	{
+		cout << "offset too low, increase plainModulus";
+		return;
+	}
+
 	//the values contained here are the percentage values of each color to be taken to make the grey
 	//those are multiplied by 100 to be integers, and have to be normalised afterward
 	//this is done automaticaly with the help of the normalisation matrix
@@ -94,7 +100,7 @@ void ImageCiphertext::grey()
 
 	auto timeStart = chrono::high_resolution_clock::now();
 
-	for(uint64_t i=0; i<encryptedImageData.size(); i+=3)
+	for(uint64_t i = 0; i < encryptedImageData.size(); i += 3)
 	{
 		//removing offset to multiply only pixel value
 		evaluator.sub_plain(encryptedImageData.at(i), offsetPlain, tampon);
@@ -105,6 +111,7 @@ void ImageCiphertext::grey()
 
 		evaluator.sub_plain(encryptedImageData.at(i+2), offsetPlain, tampon);
 		evaluator.multiply_plain(tampon, blueCoeffCRT, weightedBlue);
+
 
 		//adding every value to one ciphertext, then putting back offset
 		evaluator.add(weightedRed, weightedGreen);

@@ -22,7 +22,7 @@ void ImagePlaintext::encrypt(ImageCiphertext &destination)
 
 	Encryptor encryptor(imageContext, pKey);
 	Decryptor decryptor(imageContext, sKey);
-	Ciphertext cipherTampon = Ciphertext();
+	Ciphertext cipherTampon;
 
 	vector<Ciphertext> encryptedImageData;
 
