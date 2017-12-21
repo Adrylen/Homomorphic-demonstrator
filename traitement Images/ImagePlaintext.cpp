@@ -1,11 +1,18 @@
 #include "image.h"
-#include "png-util.h"
+
+
+//#######################################################################################################
+//############################################ public methods ###########################################
+//#######################################################################################################
+
 
 ImagePlaintext::ImagePlaintext(const EncryptionParameters &parameters, char* fileName)
 {
 	this->imageParameters = parameters;
 
 	toPlaintext(fileName);
+
+	initNorm();
 
 	generateKeys();
 }
@@ -78,13 +85,10 @@ void ImagePlaintext::toPlaintext(char* fileName)
 	PolyCRTBuilder crtbuilder(imageContext);
 	read_png_file(fileName);
 
-	if(width > imageContext.poly_modulus().significant_coeff_count() - 1)
+	if(imageWidth > imageContext.poly_modulus().significant_coeff_count() - 1)
 		throw invalid_argument("poly_modulus must be over image width");
 
 	cout << "beginning encoding" << endl;
-
-	imageWidth = width;
-	imageHeight = height;
 
 	//calculating offset to apply to values to put them at the center of the plain modulus
 	uint64_t plainModulus = *imageContext.plain_modulus().pointer();
@@ -100,10 +104,10 @@ void ImagePlaintext::toPlaintext(char* fileName)
 	Plaintext greensPoly;
 	Plaintext bluesPoly;
 
-	for(int i = 0; i < height; i++)
+	for(int i = 0; i < imageHeight; i++)
 	{
 		png_bytep row = row_pointers[i];
-		for(int j = 0; j < width; j++)
+		for(int j = 0; j < imageWidth; j++)
 		{
 			png_bytep px = &(row[j * 4]);
 
@@ -135,9 +139,6 @@ void ImagePlaintext::toImage(string fileName)
 
 	cout << "beginning decoding" << endl;
 
-	int height = imageHeight;
-	int width = imageWidth;
-
 	//calculating offset to be removed
 	uint64_t plainModulus = *imageContext.plain_modulus().pointer();
 	int offset = (int)(plainModulus - 255) / 2;
@@ -146,7 +147,7 @@ void ImagePlaintext::toImage(string fileName)
 	vector<uint64_t> greens(crtbuilder.slot_count(), 0);
 	vector<uint64_t> blues(crtbuilder.slot_count(), 0);
 
-	for(int i = 0; i < height; i++)
+	for(int i = 0; i < imageHeight; i++)
 	{
 		png_bytep row = row_pointers[i];
 
@@ -154,7 +155,7 @@ void ImagePlaintext::toImage(string fileName)
 		crtbuilder.decompose(imageData.at(i * 3 + 1), greens);
 		crtbuilder.decompose(imageData.at(i * 3 + 2), blues);
 
-		for(int j = 0; j < width; j++)
+		for(int j = 0; j < imageWidth; j++)
 		{
 			png_bytep px = &(row[j * 4]);
 
@@ -211,12 +212,13 @@ void ImagePlaintext::printParameters()
 
 
 //###################################################################################################################
-//############################################ private classes ######################################################
+//############################################ private methods ######################################################
 //###################################################################################################################
 
 void ImagePlaintext::generateKeys()
 {
 	cout << "generating keys" << endl;
+	auto timeStart = chrono::high_resolution_clock::now();
 
 	SEALContext context(imageParameters);
 
@@ -231,9 +233,36 @@ void ImagePlaintext::generateKeys()
     //inversely, taking a higher value will result in more noise but will process faster
     generator.generate_galois_keys(30, gKey);
 
-    cout << "keys generated successfully" << endl << endl;
+    auto timeStop = chrono::high_resolution_clock::now();
+    cout << "--> keys generated successfully in " << chrono::duration_cast<chrono::milliseconds>(timeStop - timeStart).count() << " milliseconds" << endl << endl;
 }
 
+void ImagePlaintext::initNorm()
+{
+	normalisation = (float***) malloc(imageHeight*sizeof(*normalisation));
+
+	for(int i = 0; i < imageHeight; i++)
+	{
+		normalisation[i] = (float**) malloc(imageWidth*sizeof(**normalisation));
+
+		for(int j = 0; j < imageWidth; j++)
+		{
+			normalisation[i][j] = (float*) malloc(3*sizeof(***normalisation));
+		}
+	}
+
+
+	for(int i = 0; i < imageHeight; i++)
+	{
+		for(int j = 0; j < imageWidth; j++)
+		{
+			for(int k = 0; k < 3; k++)
+			{
+				normalisation[i][j][k] = 1.0;		
+			}
+		}
+	}
+}
 
 void ImagePlaintext::copyNorm(float ***norm)
 {
@@ -247,4 +276,102 @@ void ImagePlaintext::copyNorm(float ***norm)
 			}
 		}
 	}
+}
+
+void ImagePlaintext::read_png_file(char *filename) 
+{
+	FILE *fp = fopen(filename, "rb");
+
+	png_structp png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+	if(!png) abort();
+
+	png_infop info = png_create_info_struct(png);
+	if(!info) abort();
+
+	if(setjmp(png_jmpbuf(png))) abort();
+
+	png_init_io(png, fp);
+
+	png_read_info(png, info);
+
+	imageWidth      	= png_get_image_width(png, info);
+	imageHeight     	= png_get_image_height(png, info);
+	color_type 			= png_get_color_type(png, info);
+	bit_depth  			= png_get_bit_depth(png, info);
+
+	// Read any color_type into 8bit depth, RGBA format.
+	// See http://www.libpng.org/pub/png/libpng-manual.txt
+
+	if(bit_depth == 16)
+	png_set_strip_16(png);
+
+	if(color_type == PNG_COLOR_TYPE_PALETTE)
+	png_set_palette_to_rgb(png);
+
+	// PNG_COLOR_TYPE_GRAY_ALPHA is always 8 or 16bit depth.
+	if(color_type == PNG_COLOR_TYPE_GRAY && bit_depth < 8)
+	png_set_expand_gray_1_2_4_to_8(png);
+
+	if(png_get_valid(png, info, PNG_INFO_tRNS))
+	png_set_tRNS_to_alpha(png);
+
+	// These color_type don't have an alpha channel then fill it with 0xff.
+	if(color_type == PNG_COLOR_TYPE_RGB ||
+	 color_type == PNG_COLOR_TYPE_GRAY ||
+	 color_type == PNG_COLOR_TYPE_PALETTE)
+	png_set_filler(png, 0xFF, PNG_FILLER_AFTER);
+
+	if(color_type == PNG_COLOR_TYPE_GRAY ||
+	 color_type == PNG_COLOR_TYPE_GRAY_ALPHA)
+	png_set_gray_to_rgb(png);
+
+	png_read_update_info(png, info);
+
+	row_pointers = (png_bytep*)malloc(sizeof(png_bytep) * imageHeight);
+	for(int y = 0; y < imageHeight; y++) {
+	row_pointers[y] = (png_byte*)malloc(png_get_rowbytes(png,info));
+	}
+
+	png_read_image(png, row_pointers);
+
+	fclose(fp);
+}
+
+void ImagePlaintext::write_png_file(char *filename) 
+{
+	FILE *fp = fopen(filename, "wb");
+	if(!fp) abort();
+
+	png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+	if (!png) abort();
+
+	png_infop info = png_create_info_struct(png);
+	if (!info) abort();
+
+	if (setjmp(png_jmpbuf(png))) abort();
+
+	png_init_io(png, fp);
+
+	// Output is 8bit depth, RGBA format.
+	png_set_IHDR(
+	png,
+	info,
+	imageWidth, imageHeight,
+	8,
+	PNG_COLOR_TYPE_RGBA,
+	PNG_INTERLACE_NONE,
+	PNG_COMPRESSION_TYPE_DEFAULT,
+	PNG_FILTER_TYPE_DEFAULT
+	);
+	png_write_info(png, info);
+
+	// To remove the alpha channel for PNG_COLOR_TYPE_RGB format,
+	// Use png_set_filler().
+	//png_set_filler(png, 0, PNG_FILLER_AFTER);
+
+	png_write_image(png, row_pointers);
+	png_write_end(png, NULL);
+
+
+	fclose(fp);
 }

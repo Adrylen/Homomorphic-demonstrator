@@ -1,5 +1,6 @@
 #include "image.h"
 
+
 ImageCiphertext::ImageCiphertext(ImageCiphertext& autre)
 {
 	this->imageParameters = autre.imageParameters;
@@ -9,6 +10,8 @@ ImageCiphertext::ImageCiphertext(ImageCiphertext& autre)
 	this->imageHeight = autre.imageHeight;
 	this->normalisation = autre.normalisation;
 	this->encryptedImageData = autre.encryptedImageData;
+	this->wrongSKey = autre.wrongSKey;
+	this->row_pointers = autre.row_pointers;
 }
 
 ImageCiphertext& ImageCiphertext::operator=(const ImageCiphertext& assign)
@@ -20,6 +23,8 @@ ImageCiphertext& ImageCiphertext::operator=(const ImageCiphertext& assign)
 	this->pKey = assign.pKey;
 	this->gKey = assign.gKey;
 	this->encryptedImageData = assign.encryptedImageData;
+	this->wrongSKey = assign.wrongSKey;
+	this->row_pointers = assign.row_pointers;
 }
 
 
@@ -33,12 +38,24 @@ ImageCiphertext::ImageCiphertext(EncryptionParameters parameters, int height, in
 	this->encryptedImageData = encryptedData;
 
 	initNorm();
+
+	row_pointers = (png_bytep*)malloc(sizeof(png_bytep) * imageHeight);
+	for(int y = 0; y < imageHeight; y++) 
+	{
+		row_pointers[y] = (png_byte*)malloc(sizeof(png_bytep) * imageWidth);
+	}
+
+	SEALContext context(imageParameters);
+	KeyGenerator keygen(context);
+	this->wrongSKey = keygen.secret_key();
 }
 
 void ImageCiphertext::negate()
 {
 	if(verifyNormOver(1.0))
 	{
+		wrongDecryption("../images/beforeNegationEncrypted.png");
+
 		SEALContext imageContext(imageParameters);
 
 		Evaluator evaluator(imageContext);
@@ -56,6 +73,8 @@ void ImageCiphertext::negate()
 		auto timeStop = chrono::high_resolution_clock::now();
 
 		cout << "--> end of negate: " << chrono::duration_cast<chrono::milliseconds>(timeStop - timeStart).count() << " milliseconds" << endl << endl;
+
+		wrongDecryption("../images/afterNegationEncrypted.png");
 	}
 	else
 	{
@@ -79,6 +98,8 @@ void ImageCiphertext::grey()
 		cout << "offset too low, increase plainModulus";
 		return;
 	}
+
+	wrongDecryption("../images/beforeGreyingEncrypted.png");
 
 	//the values contained here are the percentage values of each color to be taken to make the grey
 	//those are multiplied by 100 to be integers, and have to be normalised afterward
@@ -130,6 +151,8 @@ void ImageCiphertext::grey()
 	auto timeStop = chrono::high_resolution_clock::now();
 
 	cout << "--> end of greying: " << chrono::duration_cast<chrono::milliseconds>(timeStop - timeStart).count() << " milliseconds" << endl << endl;
+
+	wrongDecryption("../images/afterGreyingEncrypted.png");
 }
 
 
@@ -141,7 +164,7 @@ void ImageCiphertext::applyFilter(Filter filter, int numThreads)
 		PolyCRTBuilder crtbuilder(imageContext);
 		Evaluator evaluator(imageContext);
 		vector<Ciphertext> newEncryptedData(imageHeight*3, Ciphertext());
-		string progressBar = string(21*numThreads, ' ');
+		string progressBar = string(9*numThreads, ' ');
 
 		//internal function to call for each thread
 		auto calculatePart = [&crtbuilder, &evaluator, &newEncryptedData, &progressBar, this](int threadIndex, Filter filter, mutex &rmtx, mutex &wmtx, int xBegin, int xEnd, const MemoryPoolHandle &pool)
@@ -154,7 +177,7 @@ void ImageCiphertext::applyFilter(Filter filter, int numThreads)
 			int progressPercentage = -1;
 
 			while(!wmtx.try_lock());
-			cout << "thread n°" << threadIndex << " beginning calculations from line " << xBegin << " to line " << xEnd << endl;
+			// cout << "thread n°" << threadIndex << " beginning calculations from line " << xBegin << " to line " << xEnd << endl;
 			wmtx.unlock();
 
 			for(int x = xBegin; x <= xEnd; x++)	//works on each assigned line of the picture
@@ -175,14 +198,13 @@ void ImageCiphertext::applyFilter(Filter filter, int numThreads)
 						{
 							progressPercentage = currentProgressPercentage;
 
-							string insert = "thread n°";
-							insert.append(to_string(threadIndex));
+							string insert;
 							insert.append(" [ ");
 							insert.append(to_string(progressPercentage));
 							insert.append("% ] ");
 
 							while(!wmtx.try_lock());
-							progressBar.replace((threadIndex-1)*21, insert.length(), insert);
+							progressBar.replace((threadIndex-1)*9, insert.length(), insert);
 							cout << "\r" << progressBar;
 							cout.flush();
 							wmtx.unlock();
@@ -215,6 +237,8 @@ void ImageCiphertext::applyFilter(Filter filter, int numThreads)
 		mutex readMutex, writeMutex;	//mutex to synchronize prints to stdout between threads, and reads from data 
 		vector<thread> threads;
 
+		wrongDecryption("../images/beforeFilteringEncrypted.png");
+
 		cout << "applying filter :" << endl;
 		filter.print();
 
@@ -231,6 +255,8 @@ void ImageCiphertext::applyFilter(Filter filter, int numThreads)
 			cout << "too much threads for the height of the image, getting down to " << imageHeight << " threads" << endl;
 			numThreads = imageHeight;
 		}
+
+		cout << "begginning calculations on " << numThreads << " threads" << endl;
 
 		vector<int> linesPerThread(numThreads, 0);
 
@@ -262,6 +288,8 @@ void ImageCiphertext::applyFilter(Filter filter, int numThreads)
 		auto timeStop = chrono::high_resolution_clock::now();
 
 		cout << "\nfiltering finished: " << chrono::duration_cast<chrono::seconds>(timeStop - timeStart).count() << " seconds" << endl << endl;
+
+		wrongDecryption("../images/afterFilteringEncrypted.png");
 	}
 }
 
@@ -320,6 +348,71 @@ void ImageCiphertext::printParameters()
     cout << "\\ offset applied to values: " << (int)(imageContext.plain_modulus().value() - 255) / 2 << endl;
 
     cout << endl;
+}
+
+
+void ImageCiphertext::wrongDecryption(string fileName)
+{
+	SEALContext imageContext(imageParameters);
+	Decryptor decryptor(imageContext, this->wrongSKey);
+	PolyCRTBuilder crtbuilder(imageContext);
+
+
+	Plaintext tampon;
+	vector<Plaintext> decryptedData;
+
+	for(uint i = 0; i < encryptedImageData.size(); i++)
+	{
+		decryptor.decrypt(encryptedImageData.at(i), tampon);
+		decryptedData.push_back(tampon);
+	}
+
+	//calculating offset to be removed
+	uint64_t plainModulus = *imageContext.plain_modulus().pointer();
+	int offset = (int)(plainModulus - 255) / 2;
+
+	vector<uint64_t> reds(crtbuilder.slot_count(), 0);
+	vector<uint64_t> greens(crtbuilder.slot_count(), 0);
+	vector<uint64_t> blues(crtbuilder.slot_count(), 0);
+
+	for(int i = 0; i < imageHeight; i++)
+	{
+		png_bytep row = row_pointers[i];
+
+		crtbuilder.decompose(decryptedData.at(i * 3), reds);
+		crtbuilder.decompose(decryptedData.at(i * 3 + 1), greens);
+		crtbuilder.decompose(decryptedData.at(i * 3 + 2), blues);
+
+		for(int j = 0; j < imageWidth; j++)
+		{
+			png_bytep px = &(row[j * 4]);
+
+			//for each value, the offset is removed (thus, the value can be negative), then normalisation is applied
+			int pix0 = (int)((reds[j]-offset)*normalisation[i][j][0]);
+			//makes sure that the value is taken back to pixel dynamics
+			(pix0 < 0) ? (pix0 = 0) : (pix0 = pix0);
+			(pix0 > 255) ? (pix0 = 255) : (pix0 = pix0);
+			px[0] = pix0;
+			// cout << "(" << reds[j] << " - " << offset << ")*" << normalisation[i][j][0] << ", px[" << i << "][" << j << "][0] = " << (int)px[0] << endl;	//DEBUG
+
+			int pix1 = (int)((greens[j]-offset)*normalisation[i][j][1]);
+			(pix1 < 0) ? (pix1 = 0) : (pix1 = pix1);
+			(pix1 > 255) ? (pix1 = 255) : (pix1 = pix1);
+			px[1] = pix1;
+			// cout << "(" << greens[j] << " - " << offset << ")*" << normalisation[i][j][1] << ", px[" << i << "][" << j << "][1] = " << (int)px[1] << endl;	//DEBUG
+
+			int pix2 = (int)((blues[j]-offset)*normalisation[i][j][2]);
+			(pix2 < 0) ? (pix2 = 0) : (pix2 = pix2);
+			(pix2 > 255) ? (pix2 = 255) : (pix2 = pix2);
+			px[2] = pix2;
+			// cout << "(" << blues[j] << " - " << offset << ")*" << normalisation[i][j][2] << ", px[" << i << "][" << j << "][2] = " << (int)px[2] << endl;	//DEBUG
+
+			//writting default 255 alpha channel
+			px[3] = 255;	
+		}
+	}
+
+	write_png_file(&fileName[0u]);
 }
 
 
@@ -540,4 +633,42 @@ bool ImageCiphertext::verifyNormOver(float value)
 	}
 
 	return result;
+}
+
+void ImageCiphertext::write_png_file(char *filename)
+{
+	FILE *fp = fopen(filename, "wb");
+	if(!fp) abort();
+
+	png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+	if (!png) abort();
+
+	png_infop info = png_create_info_struct(png);
+	if (!info) abort();
+
+	if (setjmp(png_jmpbuf(png))) abort();
+
+	png_init_io(png, fp);
+
+	// Output is 8bit depth, RGBA format.
+	png_set_IHDR(
+	png,
+	info,
+	imageWidth, imageHeight,
+	8,
+	PNG_COLOR_TYPE_RGBA,
+	PNG_INTERLACE_NONE,
+	PNG_COMPRESSION_TYPE_DEFAULT,
+	PNG_FILTER_TYPE_DEFAULT
+	);
+	png_write_info(png, info);
+
+	// To remove the alpha channel for PNG_COLOR_TYPE_RGB format,
+	// Use png_set_filler().
+	//png_set_filler(png, 0, PNG_FILLER_AFTER);
+
+	png_write_image(png, row_pointers);
+	png_write_end(png, NULL);
+
+	fclose(fp);
 }

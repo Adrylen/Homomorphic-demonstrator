@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8" />
+		<title>Demonstrateur</title>
+		<script type="text/javascript" src="jquery.min.js"></script>
+		<style type="text/css">
+			html, body {
+				height: 100%;
+				overflow: hidden;
+			}
+			h1 { text-align: center; }
+			div {
+				display: inline-block;
+				border: 1px solid black;
+				border-radius: 5em;
+				width: 24%;
+				height: 98%;
+			}
+			img {
+				margin: 20% auto;
+				/*height: 10%;*/
+				display: block;
+			}
+		</style>
+	</head>
+	<body>
+		<div>
+			<h1>Original</h1>
+			<img id="triforce"/>
+		</div>
+		<div>
+			<h1>Après chiffrement</h1>
+			<img id="beforeNegationEncrypted"/>
+			<img id="beforeGreyingEncrypted"/>
+			<img id="beforeFilteringEncrypted"/>
+		</div>
+		<div>
+			<h1>Après traitement</h1>
+			<img id="afterNegationEncrypted"/>
+			<img id="afterGreyingEncrypted"/>
+			<img id="afterFilteringEncrypted"/>
+		</div>
+		<div>
+			<h1>Après déchiffrement</h1>
+			<img id="imageNegated"/>
+			<img id="imageGreyed"/>
+			<img id="imageFiltered"/>
+		</div>
+		<script type="text/javascript">
+			let displayImage = id => {
+				let image = new Image();
+
+				image.onload = () => {
+					$(`#${id}`).attr('src', image.src).width($(`#${id}`).width() * 4);
+				};
+				image.onerror = () => displayImage(id);
+
+				image.src = `../images/${id}.png`;
+			}
+
+			$('div > img').first()
+				.attr('id', location.search.substring(1))
+				.css('margin-top', '77%');
+
+			$('div > img').each((i, el) => {
+				displayImage(el.id)
+			});
+		</script>
+	</body>
+</html>

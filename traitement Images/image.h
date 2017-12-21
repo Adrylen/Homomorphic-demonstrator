@@ -5,12 +5,16 @@
 #include <thread>
 #include <mutex>
 #include <chrono>
+#include <png.h>
+
 
 #include <seal/seal.h>
 #include "filter.h"
 
+
 using namespace std;
 using namespace seal;
+
 
 class ImageCiphertext;
 class ImagePlaintext;
@@ -212,6 +216,16 @@ class ImageCiphertext
 		 */
 		void printParameters();
 
+		/**
+		 * @brief method for demonstration, creates an image with same dimensions and tries to decrypt data in it
+		 * @details this method decrypts the encrypted data contained with a wrong secret key created at construction 
+		 * then decode decrypted data to write it in a PNG file by calling write_png_file
+		 * good to know : alpha value is set manually for each pixel to 255 (no transparency)
+		 * 
+		 * @param fileName the name of the resulting PNG file
+		 */
+		void wrongDecryption(string fileName);
+
 	private :
 		/**
 		 * @brief adds the values from index 'min' to index 'max' to index position in a Ciphertext
@@ -271,12 +285,17 @@ class ImageCiphertext
 		 */
 		bool verifyNormOver(float value);
 
+		void write_png_file(char *filename);
+
 		EncryptionParameters imageParameters;
 		PublicKey pKey;
 		GaloisKeys gKey;
-		uint32_t imageHeight, imageWidth;
+		SecretKey wrongSKey;	//this key is for demonstration only, doesn't represent the real secret key of the encrypted data
 		vector<Ciphertext> encryptedImageData;
 		float ***normalisation;
+
+		uint32_t imageHeight, imageWidth;
+		png_bytep *row_pointers;	//used to write PNG pictures
 };
 
 class ImagePlaintext
@@ -429,6 +448,8 @@ class ImagePlaintext
 		 */
 		void generateKeys();
 
+		void initNorm();
+
 		/**
 		 * @brief copy values of another normalisation matrix to the one owned by the instance
 		 * 
@@ -436,11 +457,19 @@ class ImagePlaintext
 		 */
 		void copyNorm(float ***norm);
 
+		void read_png_file(char *filename);
+
+		void write_png_file(char *filename);
+
 		EncryptionParameters imageParameters;
 		SecretKey sKey;
 		PublicKey pKey;
 		GaloisKeys gKey;
-		uint32_t imageHeight, imageWidth;
 		vector<Plaintext> imageData;
 		float ***normalisation;
+
+		uint32_t imageHeight, imageWidth;
+		png_byte color_type;
+		png_byte bit_depth;
+		png_bytep *row_pointers;
 };

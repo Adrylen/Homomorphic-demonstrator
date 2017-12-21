@@ -21,3 +21,9 @@ exec:
 clean:
 	@clear
 	@find . -name "traitementImage" -delete
+
+demo:
+	@find ../images -type f -name "after*" -delete;
+	@find ../images -type f -name "before*" -delete;
+	@find ../images -type f -name "image*" -delete;
+	@./traitementImage ${FILE}
